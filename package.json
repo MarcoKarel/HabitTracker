@@ -1,0 +1,45 @@
+{
+  "name": "habit-tracker",
+  "version": "1.0.0",
+  "description": "Modern cross-platform habit tracker with React Native and React",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "web": "cd apps/web && npm start",
+    "mobile": "cd apps/mobile && expo start",
+    "mobile:ios": "cd apps/mobile && expo run:ios",
+    "mobile:android": "cd apps/mobile && expo run:android",
+    "build:web": "cd apps/web && npm run build",
+    "build:mobile": "cd apps/mobile && expo build",
+    "test": "jest",
+    "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react": "^7.34.1",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-native": "^4.1.0",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/habit-tracker.git"
+  },
+  "keywords": [
+    "habit-tracker",
+    "react-native",
+    "react",
+    "expo",
+    "supabase",
+    "cross-platform"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}

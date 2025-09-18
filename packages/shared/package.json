@@ -1,0 +1,22 @@
+{
+  "name": "@habit-tracker/shared",
+  "version": "1.0.0",
+  "description": "Shared utilities and types for habit tracker",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.3"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  }
+}
