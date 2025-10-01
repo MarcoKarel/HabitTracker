@@ -21,7 +21,6 @@ import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle }
 
 export default function ProfileScreen({ navigation }) {
   const theme = useTheme();
-  const styles = createStyles(theme);
   const [profile, setProfile] = useState({
     username: '',
     email: '',
@@ -309,9 +308,34 @@ export default function ProfileScreen({ navigation }) {
 
   useEffect(() => {
     getStatistics().then(setStats);
+    loadSubscription();
   }, []);
 
+  const [subscription, setSubscription] = useState({ plan: 'free', active: false });
+
+  const loadSubscription = async () => {
+    try {
+      const stored = await AsyncStorage.getItem('subscription');
+      if (stored) {
+        setSubscription(JSON.parse(stored));
+      }
+    } catch (err) {
+      console.error('Failed to load subscription', err);
+    }
+  };
+
+  const saveSubscription = async (sub) => {
+    try {
+      await AsyncStorage.setItem('subscription', JSON.stringify(sub));
+      setSubscription(sub);
+    } catch (err) {
+      console.error('Failed to save subscription', err);
+    }
+  };
+
   const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+
+  const styles = createStyles(theme);
 
   return (
     <Animated.ScrollView 
@@ -395,6 +419,22 @@ export default function ProfileScreen({ navigation }) {
             <Text style={styles.statNumber}>{stats.completionsCount}</Text>
             <Text style={styles.statLabel}>Completions</Text>
           </Animated.View>
+        </View>
+      </Animated.View>
+
+      <Animated.View style={[styles.subscriptionSection, { transform: [{ translateY: slideAnim }] }]}>
+        <Text style={styles.sectionTitle}>Subscription</Text>
+        <View style={styles.subscriptionCard}>
+          <Text style={styles.subscriptionPlan}>{subscription.plan === 'free' ? 'Free' : subscription.plan === 'personal' ? 'Personal' : 'Enterprise'}</Text>
+          <Text style={styles.subscriptionStatus}>{subscription.active ? 'Active' : 'Inactive'}</Text>
+          <TouchableOpacity
+            style={styles.manageButton}
+            onPress={() => {
+              animateButton(() => navigation.navigate('Payment'));
+            }}
+          >
+            <Text style={styles.manageButtonText}>Manage Subscription</Text>
+          </TouchableOpacity>
         </View>
       </Animated.View>
 
@@ -604,321 +644,329 @@ export default function ProfileScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  header: {
-    backgroundColor: 'white',
-    padding: 20,
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  profileImageContainer: {
-    position: 'relative',
-    marginBottom: 16,
-  },
-  profileImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 3,
-    borderColor: '#007AFF',
-  },
-  defaultProfileImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#e0e0e0',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: '#007AFF',
-  },
-  cameraIcon: {
-    position: 'absolute',
-    bottom: 5,
-    right: 5,
-    backgroundColor: '#007AFF',
-    borderRadius: 15,
-    width: 30,
-    height: 30,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  userInfo: {
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  username: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
-  },
-  email: {
-    fontSize: 16,
-    color: '#666',
-  },
-  usernameInput: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    borderBottomWidth: 2,
-    borderBottomColor: '#007AFF',
-    textAlign: 'center',
-    minWidth: 200,
-    marginBottom: 8,
-    paddingVertical: 4,
-  },
-  emailInput: {
-    fontSize: 16,
-    color: '#666',
-    borderBottomWidth: 2,
-    borderBottomColor: '#007AFF',
-    textAlign: 'center',
-    minWidth: 200,
-    paddingVertical: 4,
-  },
-  actionButtons: {
-    alignItems: 'center',
-  },
-  editButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 25,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  editButtonText: {
-    color: 'white',
-    marginLeft: 6,
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  editActions: {
-    flexDirection: 'row',
-    gap: 16,
-  },
-  cancelButton: {
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 25,
-  },
-  cancelButtonText: {
-    color: '#333',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  saveButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 25,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  saveButtonText: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  statsSection: {
-    backgroundColor: 'white',
-    margin: 16,
-    padding: 20,
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 16,
-    color: '#333',
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  statCard: {
-    alignItems: 'center',
-    backgroundColor: '#f8f9fa',
-    padding: 20,
-    borderRadius: 12,
-    minWidth: 100,
-  },
-  statNumber: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#007AFF',
-  },
-  statLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 4,
-    fontWeight: '500',
-  },
-  optionsSection: {
-    backgroundColor: 'white',
-    margin: 16,
-    marginTop: 0,
-    borderRadius: 16,
-    paddingVertical: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  optionText: {
-    flex: 1,
-    fontSize: 16,
-    marginLeft: 16,
-    color: '#333',
-    fontWeight: '500',
-  },
-  logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'white',
-    margin: 16,
-    marginTop: 0,
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#FF3B30',
-    shadowColor: '#FF3B30',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  logoutText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FF3B30',
-    marginLeft: 8,
-  },
-  modalContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  modalContent: {
-    backgroundColor: 'white',
-    borderRadius: 20,
-    width: '90%',
-    maxWidth: 400,
-    maxHeight: '80%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  settingItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  settingLabel: {
-    fontSize: 16,
-    color: '#333',
-    fontWeight: '500',
-  },
-  aboutContent: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  appIcon: {
-    marginBottom: 16,
-  },
-  appName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
-  },
-  version: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 16,
-  },
-  description: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 16,
-  },
-  developer: {
-    fontSize: 14,
-    color: '#999',
-    fontStyle: 'italic',
-  },
-  helpContent: {
-    padding: 20,
-  },
-  helpSection: {
-    marginBottom: 24,
-  },
-  helpSectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
-  },
-  helpText: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-  },
-});
+function createStyles(theme) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    header: {
+      backgroundColor: theme.colors.card,
+      padding: spacing.lg,
+      alignItems: 'center',
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    profileImageContainer: {
+      position: 'relative',
+      marginBottom: spacing.md,
+    },
+    profileImage: {
+      width: 100,
+      height: 100,
+      borderRadius: 50,
+      borderWidth: 3,
+      borderColor: theme.colors.primary,
+    },
+    defaultProfileImage: {
+      width: 100,
+      height: 100,
+      borderRadius: 50,
+      backgroundColor: theme.colors.muted,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 3,
+      borderColor: theme.colors.primary,
+    },
+    cameraIcon: {
+      position: 'absolute',
+      bottom: 5,
+      right: 5,
+      backgroundColor: theme.colors.primary,
+      borderRadius: 15,
+      width: 30,
+      height: 30,
+      alignItems: 'center',
+      justifyContent: 'center',
+      ...getShadowStyle(theme, 5),
+    },
+    userInfo: {
+      alignItems: 'center',
+      marginBottom: spacing.md,
+    },
+    username: {
+      fontSize: fontSize.xl,
+      fontWeight: fontWeight.bold,
+      color: theme.colors.text,
+      marginBottom: 4,
+    },
+    email: {
+      fontSize: fontSize.md,
+      color: theme.colors.textSecondary,
+    },
+    usernameInput: {
+      fontSize: fontSize.xl,
+      fontWeight: fontWeight.bold,
+      color: theme.colors.text,
+      borderBottomWidth: 2,
+      borderBottomColor: theme.colors.primary,
+      textAlign: 'center',
+      minWidth: 200,
+      marginBottom: spacing.xs,
+      paddingVertical: 4,
+    },
+    emailInput: {
+      fontSize: fontSize.md,
+      color: theme.colors.textSecondary,
+      borderBottomWidth: 2,
+      borderBottomColor: theme.colors.primary,
+      textAlign: 'center',
+      minWidth: 200,
+      paddingVertical: 4,
+    },
+    actionButtons: {
+      alignItems: 'center',
+    },
+    editButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.colors.primary,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
+      borderRadius: borderRadius.lg,
+      ...getShadowStyle(theme, 5),
+    },
+    editButtonText: {
+      color: '#FFFFFF',
+      marginLeft: 6,
+      fontWeight: fontWeight.semibold,
+      fontSize: fontSize.md,
+    },
+    editActions: {
+      flexDirection: 'row',
+      gap: spacing.md,
+    },
+    cancelButton: {
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
+      borderRadius: borderRadius.lg,
+    },
+    cancelButtonText: {
+      color: theme.colors.text,
+      fontWeight: fontWeight.semibold,
+      fontSize: fontSize.md,
+    },
+    saveButton: {
+      backgroundColor: theme.colors.primary,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
+      borderRadius: borderRadius.lg,
+      ...getShadowStyle(theme, 5),
+    },
+    saveButtonText: {
+      color: '#FFFFFF',
+      fontWeight: fontWeight.semibold,
+      fontSize: fontSize.md,
+    },
+    statsSection: {
+      backgroundColor: theme.colors.card,
+      margin: spacing.md,
+      padding: spacing.lg,
+      borderRadius: borderRadius.lg,
+      ...getShadowStyle(theme, 3),
+    },
+    sectionTitle: {
+      fontSize: fontSize.xl,
+      fontWeight: fontWeight.bold,
+      marginBottom: spacing.md,
+      color: theme.colors.text,
+    },
+    statsGrid: {
+      flexDirection: 'row',
+      justifyContent: 'space-around',
+    },
+    statCard: {
+      alignItems: 'center',
+      backgroundColor: theme.colors.surface,
+      padding: spacing.lg,
+      borderRadius: borderRadius.md,
+      minWidth: 100,
+    },
+    statNumber: {
+      fontSize: 28,
+      fontWeight: fontWeight.bold,
+      color: theme.colors.primary,
+    },
+    statLabel: {
+      fontSize: fontSize.sm,
+      color: theme.colors.textSecondary,
+      marginTop: 4,
+      fontWeight: fontWeight.medium,
+    },
+    subscriptionSection: {
+      backgroundColor: theme.colors.card,
+      margin: spacing.md,
+      padding: spacing.md,
+      borderRadius: borderRadius.md,
+      ...getShadowStyle(theme, 2),
+    },
+    subscriptionCard: {
+      backgroundColor: theme.colors.surface,
+      padding: spacing.md,
+      borderRadius: borderRadius.sm,
+      alignItems: 'center',
+    },
+    subscriptionPlan: {
+      fontSize: fontSize.lg,
+      fontWeight: fontWeight.bold,
+      color: theme.colors.primary,
+    },
+    subscriptionStatus: {
+      marginTop: 6,
+      fontSize: fontSize.sm,
+      color: theme.colors.textSecondary,
+    },
+    manageButton: {
+      marginTop: spacing.md,
+      backgroundColor: theme.colors.primary,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.lg,
+      borderRadius: borderRadius.lg,
+    },
+    manageButtonText: {
+      color: '#FFFFFF',
+      fontWeight: fontWeight.bold,
+    },
+    optionsSection: {
+      backgroundColor: theme.colors.card,
+      margin: spacing.md,
+      marginTop: 0,
+      borderRadius: borderRadius.lg,
+      paddingVertical: spacing.xs,
+      ...getShadowStyle(theme, 3),
+    },
+    option: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.md,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    optionText: {
+      flex: 1,
+      fontSize: fontSize.md,
+      marginLeft: spacing.md,
+      color: theme.colors.text,
+      fontWeight: fontWeight.medium,
+    },
+    logoutButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.colors.card,
+      margin: spacing.md,
+      marginTop: 0,
+      padding: spacing.md,
+      borderRadius: borderRadius.lg,
+      borderWidth: 2,
+      borderColor: theme.colors.error,
+      ...getShadowStyle(theme, 3),
+    },
+    logoutText: {
+      fontSize: fontSize.md,
+      fontWeight: fontWeight.semibold,
+      color: theme.colors.error,
+      marginLeft: spacing.xs,
+    },
+    modalContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    },
+    modalContent: {
+      backgroundColor: theme.colors.card,
+      borderRadius: borderRadius.xl,
+      width: '90%',
+      maxWidth: 400,
+      maxHeight: '80%',
+      ...getShadowStyle(theme, 10),
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: spacing.lg,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    modalTitle: {
+      fontSize: fontSize.xl,
+      fontWeight: fontWeight.bold,
+      color: theme.colors.text,
+    },
+    settingItem: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.md,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    settingLabel: {
+      fontSize: fontSize.md,
+      color: theme.colors.text,
+      fontWeight: fontWeight.medium,
+    },
+    aboutContent: {
+      padding: spacing.lg,
+      alignItems: 'center',
+    },
+    appIcon: {
+      marginBottom: spacing.md,
+    },
+    appName: {
+      fontSize: fontSize.xl,
+      fontWeight: fontWeight.bold,
+      color: theme.colors.text,
+      marginBottom: 4,
+    },
+    version: {
+      fontSize: fontSize.md,
+      color: theme.colors.textSecondary,
+      marginBottom: spacing.md,
+    },
+    description: {
+      fontSize: fontSize.md,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      lineHeight: 24,
+      marginBottom: spacing.md,
+    },
+    developer: {
+      fontSize: fontSize.sm,
+      color: theme.colors.muted,
+      fontStyle: 'italic',
+    },
+    helpContent: {
+      padding: spacing.lg,
+    },
+    helpSection: {
+      marginBottom: spacing.lg,
+    },
+    helpSectionTitle: {
+      fontSize: fontSize.lg,
+      fontWeight: fontWeight.bold,
+      color: theme.colors.text,
+      marginBottom: spacing.xs,
+    },
+    helpText: {
+      fontSize: fontSize.sm,
+      color: theme.colors.textSecondary,
+      lineHeight: 20,
+    },
+  });
+}

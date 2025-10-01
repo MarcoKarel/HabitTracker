@@ -13,6 +13,7 @@ import { Picker } from '@react-native-picker/picker';
 import HabitHeatmap from '../components/HabitHeatmap';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
+import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
 
 export default function StatisticsScreen() {
   const theme = useTheme();

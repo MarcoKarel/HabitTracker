@@ -11,6 +11,7 @@ import HomeScreen from './screens/HomeScreen';
 import HabitsScreen from './screens/HabitsScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import StatisticsScreen from './screens/StatisticsScreen';
+import PaymentScreen from './screens/PaymentScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -103,6 +104,7 @@ export default function App() {
       <Stack.Navigator initialRouteName="Login">
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Payment" component={PaymentScreen} options={{ title: 'Subscription' }} />
         <Stack.Screen name="Main" component={TabNavigator} options={{ headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
