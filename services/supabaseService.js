@@ -696,4 +696,533 @@ export const subscriptions = {
   },
 };
 
+// ============================================================================
+// SOCIAL FEATURES (Premium)
+// ============================================================================
+
+export const socialFeatures = {
+  // Friend connections
+  sendFriendRequest: async (userId, friendEmail) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    
+    // First, find the friend by email
+    const { data: friend, error: friendError } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', friendEmail)
+      .single();
+    
+    if (friendError || !friend) {
+      return { data: null, error: { message: 'User not found' } };
+    }
+    
+    const { data, error } = await supabase
+      .from('friend_connections')
+      .insert({
+        user_id: userId,
+        friend_id: friend.id,
+        status: 'pending'
+      })
+      .select()
+      .single();
+    
+    return { data, error };
+  },
+
+  acceptFriendRequest: async (connectionId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('friend_connections')
+      .update({ status: 'accepted' })
+      .eq('id', connectionId)
+      .select()
+      .single();
+    return { data, error };
+  },
+
+  getFriends: async (userId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('friend_connections')
+      .select(`
+        id,
+        status,
+        created_at,
+        friend:friend_id (id, username, email)
+      `)
+      .eq('user_id', userId)
+      .eq('status', 'accepted');
+    return { data, error };
+  },
+
+  getPendingRequests: async (userId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('friend_connections')
+      .select(`
+        id,
+        created_at,
+        requester:user_id (id, username, email)
+      `)
+      .eq('friend_id', userId)
+      .eq('status', 'pending');
+    return { data, error };
+  },
+
+  removeFriend: async (connectionId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { error } = await supabase
+      .from('friend_connections')
+      .delete()
+      .eq('id', connectionId);
+    return { error };
+  },
+
+  // Leaderboard
+  getLeaderboard: async (userId, period = 'weekly') => {
+    if (!supabase) throw new Error('Supabase not configured');
+    try {
+      const { data, error } = await supabase.rpc('get_friends_leaderboard', {
+        p_user_id: userId,
+        p_period: period
+      });
+      return { data, error };
+    } catch (error) {
+      if (error.message?.includes('Premium feature')) {
+        return { 
+          data: null, 
+          error: { 
+            message: error.message,
+            code: 'PREMIUM_FEATURE_REQUIRED',
+            isPremiumFeature: true
+          }
+        };
+      }
+      return { data: null, error };
+    }
+  },
+
+  // Habit sharing
+  shareHabit: async (habitId, ownerId, sharedWithId, permissions = {}) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('habit_shares')
+      .insert({
+        habit_id: habitId,
+        owner_id: ownerId,
+        shared_with_id: sharedWithId,
+        can_view: permissions.canView ?? true,
+        can_comment: permissions.canComment ?? false
+      })
+      .select()
+      .single();
+    return { data, error };
+  },
+
+  getSharedHabits: async (userId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('habit_shares')
+      .select(`
+        id,
+        can_view,
+        can_comment,
+        habit:habit_id (id, name, description, icon, color),
+        owner:owner_id (username)
+      `)
+      .eq('shared_with_id', userId);
+    return { data, error };
+  },
+};
+
+// ============================================================================
+// CHALLENGES (Premium)
+// ============================================================================
+
+export const challenges = {
+  getTemplates: async (isPremium = false) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    let query = supabase
+      .from('challenge_templates')
+      .select('*')
+      .order('difficulty');
+    
+    if (!isPremium) {
+      query = query.eq('is_premium', false);
+    }
+    
+    const { data, error } = await query;
+    return { data, error };
+  },
+
+  getUserChallenges: async (userId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    try {
+      const { data, error } = await supabase.rpc('get_user_active_challenges', {
+        p_user_id: userId
+      });
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  createChallenge: async (challenge) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('user_challenges')
+      .insert(challenge)
+      .select()
+      .single();
+    return { data, error };
+  },
+
+  updateChallengeProgress: async (challengeId, userId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    try {
+      const { error } = await supabase.rpc('update_challenge_progress', {
+        p_challenge_id: challengeId,
+        p_user_id: userId
+      });
+      return { error };
+    } catch (error) {
+      return { error };
+    }
+  },
+
+  abandonChallenge: async (challengeId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('user_challenges')
+      .update({ status: 'abandoned' })
+      .eq('id', challengeId)
+      .select()
+      .single();
+    return { data, error };
+  },
+};
+
+// ============================================================================
+// ACHIEVEMENTS & GAMIFICATION (Premium)
+// ============================================================================
+
+export const gamification = {
+  getUserStats: async (userId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('user_gamification')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+    
+    // Create if doesn't exist
+    if (error && error.code === 'PGRST116') {
+      const { data: newData, error: createError } = await supabase
+        .from('user_gamification')
+        .insert({ user_id: userId })
+        .select()
+        .single();
+      return { data: newData, error: createError };
+    }
+    
+    return { data, error };
+  },
+
+  getAchievements: async (userId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    try {
+      const { data, error } = await supabase.rpc('get_user_achievements_progress', {
+        p_user_id: userId
+      });
+      return { data, error };
+    } catch (error) {
+      return { data: null, error };
+    }
+  },
+
+  unlockAchievement: async (userId, achievementId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('user_achievements')
+      .insert({
+        user_id: userId,
+        achievement_id: achievementId
+      })
+      .select()
+      .single();
+    
+    if (!error) {
+      // Update user gamification stats
+      await supabase
+        .from('user_gamification')
+        .update({ 
+          achievements_unlocked: supabase.raw('achievements_unlocked + 1')
+        })
+        .eq('user_id', userId);
+    }
+    
+    return { data, error };
+  },
+
+  addPoints: async (userId, points, reason = '') => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('user_gamification')
+      .update({ 
+        total_points: supabase.raw(`total_points + ${points}`)
+      })
+      .eq('user_id', userId)
+      .select()
+      .single();
+    return { data, error };
+  },
+};
+
+// ============================================================================
+// AI COACHING & INSIGHTS (Premium)
+// ============================================================================
+
+export const aiCoaching = {
+  getInsights: async (userId, limit = 10) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    try {
+      const { data, error } = await supabase.rpc('get_user_ai_insights', {
+        p_user_id: userId,
+        p_limit: limit
+      });
+      return { data, error };
+    } catch (error) {
+      if (error.message?.includes('Premium feature')) {
+        return { 
+          data: null, 
+          error: { 
+            message: error.message,
+            code: 'PREMIUM_FEATURE_REQUIRED',
+            isPremiumFeature: true
+          }
+        };
+      }
+      return { data: null, error };
+    }
+  },
+
+  generateInsight: async (userId, habitId = null) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    try {
+      const { data, error } = await supabase.rpc('generate_ai_insight', {
+        p_user_id: userId,
+        p_habit_id: habitId
+      });
+      return { data, error };
+    } catch (error) {
+      if (error.message?.includes('Premium feature')) {
+        return { 
+          data: null, 
+          error: { 
+            message: error.message,
+            code: 'PREMIUM_FEATURE_REQUIRED',
+            isPremiumFeature: true
+          }
+        };
+      }
+      return { data: null, error };
+    }
+  },
+
+  markInsightAsRead: async (insightId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('ai_insights')
+      .update({ is_read: true })
+      .eq('id', insightId)
+      .select()
+      .single();
+    return { data, error };
+  },
+
+  getCoachingGoals: async (userId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('coaching_goals')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('deadline', { ascending: true });
+    return { data, error };
+  },
+
+  createCoachingGoal: async (goal) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('coaching_goals')
+      .insert(goal)
+      .select()
+      .single();
+    return { data, error };
+  },
+
+  updateGoalProgress: async (goalId, currentValue) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('coaching_goals')
+      .update({ current_value: currentValue })
+      .eq('id', goalId)
+      .select()
+      .single();
+    
+    // Check if goal is completed
+    if (data && data.current_value >= data.target_value) {
+      await supabase
+        .from('coaching_goals')
+        .update({ status: 'completed' })
+        .eq('id', goalId);
+    }
+    
+    return { data, error };
+  },
+};
+
+// ============================================================================
+// INTEGRATIONS (Premium)
+// ============================================================================
+
+export const integrations = {
+  getAll: async (userId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('integrations')
+      .select('id, service_name, is_active, settings, created_at')
+      .eq('user_id', userId);
+    return { data, error };
+  },
+
+  connect: async (userId, serviceName, tokens, settings = {}) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('integrations')
+      .upsert({
+        user_id: userId,
+        service_name: serviceName,
+        is_active: true,
+        access_token: tokens.accessToken,
+        refresh_token: tokens.refreshToken,
+        token_expires_at: tokens.expiresAt,
+        settings: settings
+      })
+      .select()
+      .single();
+    return { data, error };
+  },
+
+  disconnect: async (integrationId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { error } = await supabase
+      .from('integrations')
+      .delete()
+      .eq('id', integrationId);
+    return { error };
+  },
+
+  updateSettings: async (integrationId, settings) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('integrations')
+      .update({ settings })
+      .eq('id', integrationId)
+      .select()
+      .single();
+    return { data, error };
+  },
+};
+
+// ============================================================================
+// SMART REMINDERS (Premium)
+// ============================================================================
+
+export const smartReminders = {
+  getForHabit: async (userId, habitId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('smart_reminders')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('habit_id', habitId)
+      .single();
+    return { data, error };
+  },
+
+  create: async (reminder) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('smart_reminders')
+      .insert(reminder)
+      .select()
+      .single();
+    return { data, error };
+  },
+
+  update: async (reminderId, updates) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('smart_reminders')
+      .update(updates)
+      .eq('id', reminderId)
+      .select()
+      .single();
+    return { data, error };
+  },
+
+  recordSuccess: async (reminderId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase.rpc('increment', {
+      table_name: 'smart_reminders',
+      row_id: reminderId,
+      column_name: 'times_completed_after'
+    });
+    return { data, error };
+  },
+};
+
+// ============================================================================
+// HABIT DEPENDENCIES (Premium)
+// ============================================================================
+
+export const habitDependencies = {
+  create: async (userId, habitId, dependsOnHabitId, type = 'before') => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('habit_dependencies')
+      .insert({
+        user_id: userId,
+        habit_id: habitId,
+        depends_on_habit_id: dependsOnHabitId,
+        dependency_type: type
+      })
+      .select()
+      .single();
+    return { data, error };
+  },
+
+  getForHabit: async (habitId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('habit_dependencies')
+      .select(`
+        *,
+        depends_on:depends_on_habit_id (id, name, icon, color)
+      `)
+      .eq('habit_id', habitId);
+    return { data, error };
+  },
+
+  delete: async (dependencyId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { error } = await supabase
+      .from('habit_dependencies')
+      .delete()
+      .eq('id', dependencyId);
+    return { error };
+  },
+};
+
 export default supabase;

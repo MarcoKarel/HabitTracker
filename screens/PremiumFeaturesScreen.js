@@ -142,13 +142,49 @@ export default function PremiumFeaturesScreen({ navigation }) {
 
   const premiumFeatures = [
     {
+      id: 'challenges',
+      icon: 'trophy',
+      title: 'Habit Challenges',
+      description: 'Take on 7-90 day challenges to build habits faster',
+      color: '#FFD700',
+      requiresPremium: true,
+      screen: 'Challenges',
+    },
+    {
+      id: 'social',
+      icon: 'people',
+      title: 'Social & Leaderboards',
+      description: 'Compete with friends and climb the leaderboard',
+      color: '#4ECDC4',
+      requiresPremium: true,
+      screen: 'Social',
+    },
+    {
+      id: 'achievements',
+      icon: 'medal',
+      title: 'Achievements & Badges',
+      description: 'Unlock achievements and earn points as you progress',
+      color: '#9C27B0',
+      requiresPremium: true,
+      screen: 'Achievements',
+    },
+    {
+      id: 'ai-coaching',
+      icon: 'bulb',
+      title: 'AI Coaching',
+      description: 'Get personalized insights and smart recommendations',
+      color: '#FF6B6B',
+      requiresPremium: true,
+      screen: 'AICoach',
+    },
+    {
       id: 'analytics',
       icon: 'analytics',
       title: 'Advanced Analytics',
       description: 'Detailed insights, trends, and predictions for your habits',
-      color: '#FF6B6B',
+      color: '#FF9800',
       requiresPremium: true,
-      screen: 'Habits', // User selects habit first
+      screen: 'Habits',
       action: () => {
         Alert.alert(
           'Advanced Analytics',
@@ -158,11 +194,19 @@ export default function PremiumFeaturesScreen({ navigation }) {
       }
     },
     {
+      id: 'integrations',
+      icon: 'link',
+      title: 'Smart Integrations',
+      description: 'Sync with Google Calendar, Apple Health, Fitbit & more',
+      color: '#2196F3',
+      requiresPremium: true,
+    },
+    {
       id: 'categories',
       icon: 'file-tray-stacked',
       title: 'Habit Categories',
       description: 'Organize your habits by custom categories',
-      color: '#4ECDC4',
+      color: '#95E1D3',
       requiresPremium: true,
     },
     {
@@ -170,14 +214,6 @@ export default function PremiumFeaturesScreen({ navigation }) {
       icon: 'library',
       title: 'Premium Templates',
       description: 'Access exclusive habit templates and recommendations',
-      color: '#95E1D3',
-      requiresPremium: true,
-    },
-    {
-      id: 'themes',
-      icon: 'color-palette',
-      title: 'Custom Themes',
-      description: 'Create personalized color schemes for your app',
       color: '#AA96DA',
       requiresPremium: true,
     },
@@ -219,9 +255,17 @@ export default function PremiumFeaturesScreen({ navigation }) {
     {
       id: 'reminders',
       icon: 'notifications',
-      title: 'Advanced Reminders',
-      description: 'Multiple custom reminders per habit',
+      title: 'Smart Reminders',
+      description: 'AI-powered optimal timing for your reminders',
       color: '#F3A683',
+      requiresPremium: true,
+    },
+    {
+      id: 'dependencies',
+      icon: 'git-branch',
+      title: 'Habit Dependencies',
+      description: 'Chain habits together with smart dependencies',
+      color: '#607D8B',
       requiresPremium: true,
     },
   ];
@@ -326,13 +370,33 @@ export default function PremiumFeaturesScreen({ navigation }) {
           <View style={styles.benefitsContainer}>
             <Text style={styles.sectionTitle}>Why Upgrade?</Text>
             <BenefitItem 
+              icon="trophy" 
+              text="Join challenges and compete with friends" 
+              theme={theme} 
+            />
+            <BenefitItem 
+              icon="medal" 
+              text="Unlock achievements and earn rewards" 
+              theme={theme} 
+            />
+            <BenefitItem 
+              icon="people" 
+              text="Social features and leaderboards" 
+              theme={theme} 
+            />
+            <BenefitItem 
+              icon="bulb" 
+              text="AI-powered coaching and insights" 
+              theme={theme} 
+            />
+            <BenefitItem 
               icon="infinite" 
               text="Unlimited habits - no restrictions" 
               theme={theme} 
             />
             <BenefitItem 
               icon="analytics" 
-              text="Advanced analytics and insights" 
+              text="Advanced analytics and predictions" 
               theme={theme} 
             />
             <BenefitItem 
@@ -348,6 +412,11 @@ export default function PremiumFeaturesScreen({ navigation }) {
             <BenefitItem 
               icon="camera" 
               text="Track progress with photos" 
+              theme={theme} 
+            />
+            <BenefitItem 
+              icon="link" 
+              text="Integrate with your favorite apps" 
               theme={theme} 
             />
             <BenefitItem 

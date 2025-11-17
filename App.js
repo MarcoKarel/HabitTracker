@@ -14,6 +14,10 @@ import HabitsScreen from './screens/HabitsScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import StatisticsScreen from './screens/StatisticsScreen';
 import PaymentScreen from './screens/PaymentScreen';
+import PremiumFeaturesScreen from './screens/PremiumFeaturesScreen';
+import ChallengesScreen from './screens/ChallengesScreen';
+import AchievementsScreen from './screens/AchievementsScreen';
+import SocialScreen from './screens/SocialScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -151,6 +155,10 @@ function AppContent() {
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Payment" component={PaymentScreen} options={{ title: 'Subscription' }} />
+        <Stack.Screen name="PremiumFeatures" component={PremiumFeaturesScreen} options={{ title: 'Premium Features' }} />
+        <Stack.Screen name="Challenges" component={ChallengesScreen} options={{ title: 'Challenges' }} />
+        <Stack.Screen name="Achievements" component={AchievementsScreen} options={{ title: 'Achievements' }} />
+        <Stack.Screen name="Social" component={SocialScreen} options={{ title: 'Social' }} />
         <Stack.Screen name="Main" component={TabNavigator} options={{ headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
