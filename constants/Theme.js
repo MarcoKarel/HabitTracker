@@ -1,4 +1,6 @@
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useColorScheme } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Light theme colors
 const lightTheme = {
@@ -36,51 +38,112 @@ const lightTheme = {
   shadowDark: 'rgba(0, 0, 0, 0.2)',
 };
 
-// Dark theme colors
-const darkTheme = {
-  // Background colors
-  background: '#000000',
-  surface: '#1C1C1E',
-  surfaceVariant: '#2C2C2E',
-  
+
+// Dark Habit Tracker Palette (Red-Accent Theme)
+// Works beautifully with a minimalist red + black preference
+export const darkRedTheme = {
+  // Core Backgrounds
+  background: '#0D0D0D', // deep charcoal black
+  surface: '#1A1A1A', // soft dark grey
+  surfaceVariant: '#151515',
+
+  // Borders / dividers
+  cardBorder: '#2E2E2E', // subtle lines for separation
+
   // Text colors
-  text: '#FFFFFF',
-  textSecondary: '#EBEBF5',
+  text: '#FFFFFF', // primary text
+  textSecondary: '#B3B3B3', // muted grey
+  textDisabled: '#6B6B6B', // disabled text
   textTertiary: '#8E8E93',
-  
-  // Primary colors
-  primary: '#0A84FF',
-  primaryVariant: '#409CFF',
-  
-  // Accent colors
-  accent: '#30D158',
-  warning: '#FF9F0A',
+
+  // Accent (Red)
+  primary: '#E63946', // Accent Red (buttons & progress)
+  primaryVariant: '#FF4D5A', // Accent Hover Red (active states)
+
+  // Optional semantic colors
+  success: '#3ECF8E',
+  warning: '#E8A317',
   error: '#FF453A',
-  
+
   // Card and component colors
-  card: '#1C1C1E',
-  cardBorder: '#38383A',
-  inputBackground: '#2C2C2E',
-  inputBorder: '#38383A',
-  
+  card: '#1A1A1A',
+  inputBackground: '#131313',
+  inputBorder: '#2E2E2E',
+
   // Navigation
-  tabBar: '#1C1C1E',
-  tabBarBorder: '#38383A',
-  
-  // Shadow
-  shadow: 'rgba(0, 0, 0, 0.3)',
-  shadowDark: 'rgba(0, 0, 0, 0.5)',
+  tabBar: '#0D0D0D',
+  tabBarBorder: '#2E2E2E',
+
+  // Charts / Progress
+  habitRingBase: '#333333',
+  habitRingProgress: '#E63946',
+
+  // Shadows
+  shadow: 'rgba(0, 0, 0, 0.35)',
+  shadowDark: 'rgba(0, 0, 0, 0.6)',
 };
 
+
 // Hook to get current theme based on device preference
+const STORAGE_KEY = '@habittracker:colorMode';
+
+const ThemeContext = createContext(null);
+
+export const ThemeProvider = ({ children }) => {
+  const systemScheme = useColorScheme();
+  const [colorMode, setColorMode] = useState('system'); // 'system' | 'light' | 'dark'
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(STORAGE_KEY);
+        if (stored === 'light' || stored === 'dark' || stored === 'system') {
+          setColorMode(stored);
+        }
+      } catch (e) {
+        // ignore
+      } finally {
+        setReady(true);
+      }
+    };
+
+    load();
+  }, []);
+
+  useEffect(() => {
+    // persist
+    const save = async () => {
+      try {
+        await AsyncStorage.setItem(STORAGE_KEY, colorMode);
+      } catch (e) {
+        // ignore
+      }
+    };
+    if (ready) save();
+  }, [colorMode, ready]);
+
+  const effectiveScheme = colorMode === 'system' ? systemScheme : colorMode;
+  const colors = effectiveScheme === 'dark' ? darkRedTheme : lightTheme;
+
+  return (
+    <ThemeContext.Provider value={{ colors, isDark: effectiveScheme === 'dark', isLight: effectiveScheme === 'light', colorMode, setColorMode }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+};
+
+// Hook to consume theme from context
 export const useTheme = () => {
-  const colorScheme = useColorScheme();
-  
-  return {
-    colors: colorScheme === 'dark' ? darkTheme : lightTheme,
-    isDark: colorScheme === 'dark',
-    isLight: colorScheme === 'light',
-  };
+  const ctx = useContext(ThemeContext);
+  if (!ctx) {
+    // Fallback to system-only behavior if provider is missing
+    const system = useColorScheme();
+    const colors = system === 'dark' ? darkRedTheme : lightTheme;
+    return { colors, isDark: system === 'dark', isLight: system === 'light', colorMode: 'system', setColorMode: () => {} };
+  }
+
+  return ctx;
 };
 
 // Common spacing and sizing constants

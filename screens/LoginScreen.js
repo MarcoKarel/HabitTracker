@@ -16,6 +16,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
+import { auth } from '../services/supabaseService';
 
 export default function LoginScreen({ navigation }) {
   const theme = useTheme();
@@ -59,6 +60,14 @@ export default function LoginScreen({ navigation }) {
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       
+      // First check if user has valid session
+      const { data: { user } } = await auth.getCurrentUser();
+      if (!user) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        Alert.alert('Please sign in first', 'You need to sign in with email and password before using biometric authentication');
+        return;
+      }
+
       const hasHardware = await LocalAuthentication.hasHardwareAsync();
       const isEnrolled = await LocalAuthentication.isEnrolledAsync();
 
@@ -125,22 +134,21 @@ export default function LoginScreen({ navigation }) {
     ]).start();
 
     try {
-      // TODO: Implement Supabase login
-      // const { user, error } = await supabase.auth.signInWithPassword({
-      //   email: email,
-      //   password: password,
-      // });
+      const res = await auth.signIn(email.trim(), password);
+      setLoading(false);
 
-      // For now, simulate successful login
-      setTimeout(async () => {
-        setLoading(false);
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        navigation.navigate('Main');
-      }, 1000);
+      if (res && res.error) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('Error', res.error.message || 'Login failed. Please check your credentials.');
+        return;
+      }
+
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      navigation.navigate('Main');
     } catch (error) {
       setLoading(false);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Error', 'Login failed. Please check your credentials.');
+      Alert.alert('Error', error?.message || 'Login failed. Please check your credentials.');
     }
   };
 

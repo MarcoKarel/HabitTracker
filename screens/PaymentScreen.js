@@ -1,13 +1,77 @@
-import React, {useState, useRef} from 'react';
+import React, {useState, useRef, useEffect} from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useTheme, spacing, borderRadius, fontSize } from '../constants/Theme';
+import { auth, userProfiles } from '../services/supabaseService';
+
+// PRODUCTION NOTE: For production deployments, implement a server-side notify_url (webhook)
+// to receive PayFast IPN notifications. The server should verify the payment signature and
+// update the subscription in the database. This client-side approach is suitable for
+// development/testing but should be complemented with server-side verification in production.
+// See Documentation/PAYMENT.md for more details.
 
 export default function PaymentScreen({ navigation }) {
   const theme = useTheme();
   const [selectedPlan, setSelectedPlan] = useState('free');
   const [showWebview, setShowWebview] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
   const webviewRef = useRef();
+
+  useEffect(() => {
+    // Get current user
+    const loadUser = async () => {
+      try {
+        const { data } = await auth.getCurrentUser();
+        if (data?.user) {
+          setCurrentUser(data.user);
+        }
+      } catch (error) {
+        console.error('Error loading user:', error);
+      }
+    };
+    loadUser();
+  }, []);
+
+  const updateSubscription = async (tier) => {
+    if (!currentUser?.id) {
+      Alert.alert('Error', 'You must be logged in to subscribe');
+      return false;
+    }
+
+    try {
+      // Calculate subscription end date (30 days from now)
+      const endsAt = new Date();
+      endsAt.setDate(endsAt.getDate() + 30);
+
+      const { data, error } = await userProfiles.updateSubscription(currentUser.id, {
+        tier: tier,
+        status: 'active',
+        endsAt: endsAt.toISOString(),
+      });
+
+      if (error) {
+        console.error('Subscription update error:', error);
+        Alert.alert('Error', 'Failed to update subscription. Please contact support.');
+        return false;
+      }
+
+      Alert.alert(
+        'Success!',
+        `Your ${tier} subscription is now active. You have full access to all premium features!`,
+        [
+          {
+            text: 'OK',
+            onPress: () => navigation.goBack(),
+          },
+        ]
+      );
+      return true;
+    } catch (error) {
+      console.error('Subscription update error:', error);
+      Alert.alert('Error', 'Failed to update subscription. Please contact support.');
+      return false;
+    }
+  };
 
   const plans = {
     free: { id: 'free', title: 'Free', subtitle: 'Basic features', priceLabel: 'R0 / month' },
@@ -102,6 +166,17 @@ export default function PaymentScreen({ navigation }) {
             javaScriptEnabled={true}
             onMessage={(event) => {
               // You can handle messages from the page here if needed
+            }}
+            onNavigationStateChange={async (navState) => {
+              // Check if the user has returned to the return_url (success page)
+              if (navState.url.includes('payfast/return') || navState.url.includes('success')) {
+                setShowWebview(false);
+                // Update subscription in database
+                await updateSubscription(selectedPlan);
+              } else if (navState.url.includes('payfast/cancel') || navState.url.includes('cancel')) {
+                setShowWebview(false);
+                Alert.alert('Payment Cancelled', 'Your payment was cancelled.');
+              }
             }}
             startInLoadingState={true}
           />

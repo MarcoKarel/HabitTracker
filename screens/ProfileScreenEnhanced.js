@@ -79,10 +79,10 @@ export default function ProfileScreen({ navigation }) {
         setProfile(profileData);
         setTempProfile(profileData);
       } else {
-        // Default profile
+        // Default profile (no example/demo credentials)
         const defaultProfile = {
-          username: 'HabitUser',
-          email: 'user@example.com',
+          username: '',
+          email: '',
           profileImage: null
         };
         setProfile(defaultProfile);

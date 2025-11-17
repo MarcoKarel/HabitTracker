@@ -21,6 +21,7 @@ import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle }
 
 export default function ProfileScreen({ navigation }) {
   const theme = useTheme();
+  const { colorMode, setColorMode } = theme;
   const [profile, setProfile] = useState({
     username: '',
     email: '',
@@ -73,6 +74,22 @@ export default function ProfileScreen({ navigation }) {
     ]).start();
   }, []);
 
+  // Header theme toggle (system -> dark -> light)
+  useEffect(() => {
+    const cycleMode = () => {
+      const next = colorMode === 'system' ? 'dark' : colorMode === 'dark' ? 'light' : 'system';
+      setColorMode(next);
+    };
+
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity onPress={cycleMode} style={{ marginRight: 12 }}>
+          <Ionicons name={colorMode === 'dark' ? 'moon' : colorMode === 'light' ? 'sunny' : 'color-filter'} size={22} color={theme.colors.text} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, colorMode, setColorMode, theme.colors.text]);
+
   const loadProfile = async () => {
     try {
       const storedProfile = await AsyncStorage.getItem('userProfile');
@@ -81,10 +98,10 @@ export default function ProfileScreen({ navigation }) {
         setProfile(profileData);
         setTempProfile(profileData);
       } else {
-        // Default profile
+        // Default profile (no example/demo credentials)
         const defaultProfile = {
-          username: 'HabitUser',
-          email: 'user@example.com',
+          username: '',
+          email: '',
           profileImage: null
         };
         setProfile(defaultProfile);

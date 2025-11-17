@@ -15,6 +15,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
+import { auth } from '../services/supabaseService';
 
 export default function RegisterScreen({ navigation }) {
   const theme = useTheme();
@@ -115,31 +116,32 @@ export default function RegisterScreen({ navigation }) {
     ]).start();
 
     try {
-      // TODO: Implement Supabase registration
-      // const { user, error } = await supabase.auth.signUp({
-      //   email: formData.email,
-      //   password: formData.password,
-      //   options: {
-      //     data: {
-      //       username: formData.username
-      //     }
-      //   }
-      // });
+      const res = await auth.signUp(formData.email.trim(), formData.password, { username: formData.username.trim() });
+      setLoading(false);
 
-      // For now, simulate successful registration
-      setTimeout(async () => {
-        setLoading(false);
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (res && res.error) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('Error', res.error.message || 'Registration failed. Please try again.');
+        return;
+      }
+
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      // If profileCreated is true, user likely has an active session and can proceed
+      if (res && res.profileCreated) {
+        navigation.navigate('Main');
+      } else {
+        // Email confirmation flow or profile creation deferred
         Alert.alert(
-          'Success', 
+          'Success',
           'Registration successful! Please check your email to verify your account.',
           [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
         );
-      }, 1000);
+      }
     } catch (error) {
       setLoading(false);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Error', 'Registration failed. Please try again.');
+      Alert.alert('Error', error?.message || 'Registration failed. Please try again.');
     }
   };
 

@@ -1,16 +1,22 @@
 // Supabase Configuration
-// Replace these values with your actual Supabase project credentials
+// This file reads values from multiple sources to work in Node, Expo, and
+// environments where process.env is not available at runtime.
+import Constants from 'expo-constants';
+
+const runtimeExtra = (Constants && (Constants.expoConfig?.extra || Constants.manifest?.extra)) || {};
+
+const SUPABASE_URL = (typeof process !== 'undefined' && process.env && process.env.SUPABASE_URL)
+  || runtimeExtra.SUPABASE_URL
+  || 'YOUR_SUPABASE_URL_HERE';
+
+const SUPABASE_ANON_KEY = (typeof process !== 'undefined' && process.env && process.env.SUPABASE_ANON_KEY)
+  || runtimeExtra.SUPABASE_ANON_KEY
+  || 'YOUR_SUPABASE_ANON_KEY_HERE';
 
 export const supabaseConfig = {
-  url: 'YOUR_SUPABASE_URL_HERE', // e.g., 'https://your-project.supabase.co'
-  anonKey: 'YOUR_SUPABASE_ANON_KEY_HERE', // Your project's anonymous/public key
+  url: SUPABASE_URL,
+  anonKey: SUPABASE_ANON_KEY,
 };
-
-// Example structure - replace with your actual values:
-// export const supabaseConfig = {
-//   url: 'https://abcdefghijklmnop.supabase.co',
-//   anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiY2RlZmdoaWprbG1ub3AiLCJyb2xlIjoiYW5vbiIsImlhdCI6MTYyNzIzOTUyNiwiZXhwIjoxOTQyODE1NTI2fQ.example',
-// };
 
 // Database Table Schemas (for reference)
 export const dbSchemas = {

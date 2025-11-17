@@ -9,15 +9,16 @@ import {
   Modal, 
   Alert, 
   Animated, 
-  Easing 
+  Easing,
+  ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import HabitCard from '../components/HabitCard';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
 import { scheduleHabitNotification, cancelHabitNotifications, formatTime, DAYS_OF_WEEK } from '../utils/notifications';
+import { auth, habits as habitsService, habitCompletions } from '../services/supabaseService';
 
 export default function HabitsScreen() {
   const theme = useTheme();
@@ -32,6 +33,8 @@ export default function HabitsScreen() {
   const [reminderTime, setReminderTime] = useState(new Date());
   const [selectedDays, setSelectedDays] = useState([1, 2, 3, 4, 5]); // Weekdays by default
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState(null);
 
   // Animation values
   const [fadeAnim] = useState(new Animated.Value(0));
@@ -39,8 +42,7 @@ export default function HabitsScreen() {
   const [fabScale] = useState(new Animated.Value(1));
 
   useEffect(() => {
-    loadHabits();
-    loadCompletions();
+    initializeUser();
     
     // Entrance animation
     Animated.parallel([
@@ -59,101 +61,114 @@ export default function HabitsScreen() {
     ]).start();
   }, []);
 
-  const loadHabits = async () => {
+  const initializeUser = async () => {
     try {
-      const storedHabits = await AsyncStorage.getItem('habits');
-      if (storedHabits) {
-        setHabits(JSON.parse(storedHabits));
-      } else {
-        // Add some default habits
-        const defaultHabits = [
-          { id: '1', name: 'Drink Water', description: '8 glasses per day', notifications: null },
-          { id: '2', name: 'Exercise', description: '30 minutes of activity', notifications: null },
-          { id: '3', name: 'Read', description: '30 minutes of reading', notifications: null },
-        ];
-        setHabits(defaultHabits);
-        await AsyncStorage.setItem('habits', JSON.stringify(defaultHabits));
+      const { data: { user } } = await auth.getCurrentUser();
+      if (user) {
+        setUserId(user.id);
+        await loadHabits(user.id);
+        await loadCompletions(user.id);
       }
+    } catch (error) {
+      console.error('Error initializing user:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadHabits = async (uid) => {
+    try {
+      const { data, error } = await habitsService.getAll(uid);
+      if (error) {
+        console.error('Error loading habits:', error);
+        return;
+      }
+      setHabits(data || []);
     } catch (error) {
       console.error('Error loading habits:', error);
     }
   };
 
-  const loadCompletions = async () => {
+  const loadCompletions = async (uid) => {
     try {
-      const storedCompletions = await AsyncStorage.getItem('completions');
-      if (storedCompletions) {
-        setCompletions(JSON.parse(storedCompletions));
+      const { data, error } = await habitCompletions.getAll(uid);
+      if (error) {
+        console.error('Error loading completions:', error);
+        return;
       }
+      setCompletions(data || []);
     } catch (error) {
       console.error('Error loading completions:', error);
     }
   };
 
-  const saveHabits = async (updatedHabits) => {
-    try {
-      await AsyncStorage.setItem('habits', JSON.stringify(updatedHabits));
-      setHabits(updatedHabits);
-    } catch (error) {
-      console.error('Error saving habits:', error);
-    }
-  };
-
-  const saveCompletions = async (updatedCompletions) => {
-    try {
-      await AsyncStorage.setItem('completions', JSON.stringify(updatedCompletions));
-      setCompletions(updatedCompletions);
-    } catch (error) {
-      console.error('Error saving completions:', error);
-    }
-  };
-
-  const addHabit = () => {
-    if (newHabitName.trim()) {
-      const newHabit = {
-        id: Date.now().toString(),
-        name: newHabitName.trim(),
-        description: newHabitDescription.trim(),
-        notifications: null,
-      };
-      const updatedHabits = [...habits, newHabit];
-      saveHabits(updatedHabits);
-      setNewHabitName('');
-      setNewHabitDescription('');
-      setModalVisible(false);
+  const addHabit = async () => {
+    if (newHabitName.trim() && userId) {
+      try {
+        const newHabit = {
+          user_id: userId,
+          name: newHabitName.trim(),
+          description: newHabitDescription.trim(),
+          color: '#007AFF',
+          frequency: { type: 'daily' },
+          target: 1,
+        };
+        
+        const { data, error } = await habitsService.create(newHabit);
+        if (error) {
+          Alert.alert('Error', 'Failed to create habit');
+          return;
+        }
+        
+        setHabits([...habits, data]);
+        setNewHabitName('');
+        setNewHabitDescription('');
+        setModalVisible(false);
+      } catch (error) {
+        Alert.alert('Error', 'Failed to create habit');
+      }
     } else {
       Alert.alert('Error', 'Please enter a habit name');
     }
   };
 
-  const toggleHabitCompletion = (habitId) => {
+  const toggleHabitCompletion = async (habitId) => {
     const today = new Date().toISOString().split('T')[0];
     const existingCompletion = completions.find(
-      c => c.habitId === habitId && c.date === today
+      c => c.habit_id === habitId && c.date === today
     );
 
-    let updatedCompletions;
-    if (existingCompletion) {
-      // Remove completion
-      updatedCompletions = completions.filter(
-        c => !(c.habitId === habitId && c.date === today)
-      );
-    } else {
-      // Add completion
-      const newCompletion = {
-        id: Date.now().toString(),
-        habitId,
-        date: today,
-        timestamp: new Date().toISOString(),
-      };
-      updatedCompletions = [...completions, newCompletion];
+    try {
+      if (existingCompletion) {
+        // Remove completion
+        const { error } = await habitCompletions.delete(existingCompletion.id);
+        if (error) {
+          Alert.alert('Error', 'Failed to remove completion');
+          return;
+        }
+        setCompletions(completions.filter(c => c.id !== existingCompletion.id));
+      } else {
+        // Add completion
+        const newCompletion = {
+          user_id: userId,
+          habit_id: habitId,
+          date: today,
+        };
+        const { data, error } = await habitCompletions.create(newCompletion);
+        if (error) {
+          Alert.alert('Error', 'Failed to add completion');
+          return;
+        }
+        setCompletions([...completions, data]);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update completion');
     }
-    saveCompletions(updatedCompletions);
   };
 
   const isHabitCompletedToday = (habitId) => {
     const today = new Date().toISOString().split('T')[0];
-    return completions.some(c => c.habitId === habitId && c.date === today);
+    return completions.some(c => c.habit_id === habitId && c.date === today);
   };
 
   const toggleDaySelection = (dayId) => {
@@ -183,21 +198,29 @@ export default function HabitsScreen() {
         selectedDays
       );
 
-      // Update habit with notification settings
+      // Update habit with notification settings in Supabase
+      const settings = {
+        notifications: {
+          time,
+          days: selectedDays,
+          enabled: true
+        }
+      };
+
+      const { error } = await habitsService.update(selectedHabit.id, { settings });
+      if (error) {
+        Alert.alert('Error', 'Failed to save notification settings');
+        return;
+      }
+
+      // Update local state
       const updatedHabits = habits.map(habit => 
         habit.id === selectedHabit.id 
-          ? { 
-              ...habit, 
-              notifications: {
-                time,
-                days: selectedDays,
-                enabled: true
-              }
-            }
+          ? { ...habit, settings }
           : habit
       );
 
-      saveHabits(updatedHabits);
+      setHabits(updatedHabits);
       setNotificationModalVisible(false);
       Alert.alert('Success', `Reminders set for ${selectedHabit.name} at ${formatTime(time)}`);
     } catch (error) {
@@ -209,13 +232,19 @@ export default function HabitsScreen() {
     try {
       await cancelHabitNotifications(habit.id);
       
+      const { error } = await habitsService.update(habit.id, { settings: { notifications: null } });
+      if (error) {
+        Alert.alert('Error', 'Failed to remove notifications');
+        return;
+      }
+
       const updatedHabits = habits.map(h => 
         h.id === habit.id 
-          ? { ...h, notifications: null }
+          ? { ...h, settings: { notifications: null } }
           : h
       );
 
-      saveHabits(updatedHabits);
+      setHabits(updatedHabits);
       Alert.alert('Success', 'Reminders removed');
     } catch (error) {
       Alert.alert('Error', 'Failed to remove notifications');
@@ -224,12 +253,13 @@ export default function HabitsScreen() {
 
   const openNotificationModal = (habit) => {
     setSelectedHabit(habit);
-    if (habit.notifications) {
+    const notifications = habit.settings?.notifications;
+    if (notifications) {
       const notificationTime = new Date();
-      notificationTime.setHours(habit.notifications.time.hour);
-      notificationTime.setMinutes(habit.notifications.time.minute);
+      notificationTime.setHours(notifications.time.hour);
+      notificationTime.setMinutes(notifications.time.minute);
       setReminderTime(notificationTime);
-      setSelectedDays(habit.notifications.days);
+      setSelectedDays(notifications.days);
     } else {
       const defaultTime = new Date();
       defaultTime.setHours(9, 0, 0, 0); // 9:00 AM
@@ -239,36 +269,47 @@ export default function HabitsScreen() {
     setNotificationModalVisible(true);
   };
 
-  const renderHabit = ({ item }) => (
-    <View style={styles.habitContainer}>
-      <HabitCard
-        habit={item}
-        onToggleCompletion={toggleHabitCompletion}
-        isCompleted={isHabitCompletedToday(item.id)}
-      />
-      <View style={styles.habitActions}>
-        <TouchableOpacity
-          style={[styles.notificationButton, item.notifications && styles.notificationActive]}
-          onPress={() => openNotificationModal(item)}
-        >
-          <Ionicons 
-            name={item.notifications ? "notifications" : "notifications-outline"} 
-            size={20} 
-            color={item.notifications ? "white" : "#007AFF"} 
-          />
-        </TouchableOpacity>
-        
-        {item.notifications && (
+  const renderHabit = ({ item }) => {
+    const notifications = item.settings?.notifications;
+    return (
+      <View style={styles.habitContainer}>
+        <HabitCard
+          habit={item}
+          onToggleCompletion={toggleHabitCompletion}
+          isCompleted={isHabitCompletedToday(item.id)}
+        />
+        <View style={styles.habitActions}>
           <TouchableOpacity
-            style={styles.removeNotificationButton}
-            onPress={() => removeNotifications(item)}
+            style={[styles.notificationButton, notifications && styles.notificationActive]}
+            onPress={() => openNotificationModal(item)}
           >
-            <Ionicons name="close" size={16} color="#FF3B30" />
+            <Ionicons 
+              name={notifications ? "notifications" : "notifications-outline"} 
+              size={20} 
+              color={notifications ? "white" : "#007AFF"} 
+            />
           </TouchableOpacity>
-        )}
+          
+          {notifications && (
+            <TouchableOpacity
+              style={styles.removeNotificationButton}
+              onPress={() => removeNotifications(item)}
+            >
+              <Ionicons name="close" size={16} color="#FF3B30" />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>

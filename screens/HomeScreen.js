@@ -1,16 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Easing, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
+import { auth, habits as habitsService, habitCompletions, userProfiles } from '../services/supabaseService';
 
 export default function HomeScreen({ navigation }) {
   const theme = useTheme();
   const styles = createStyles(theme);
+  const { colorMode, setColorMode } = theme;
   const [habits, setHabits] = useState([]);
   const [completions, setCompletions] = useState([]);
   const [todaysProgress, setTodaysProgress] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState(null);
+  const [isPremium, setIsPremium] = useState(false);
+  const [habitCount, setHabitCount] = useState(0);
+  const [habitLimit] = useState(5); // Free tier limit
 
   // Animation values
   const [fadeAnim] = useState(new Animated.Value(0));
@@ -23,7 +29,7 @@ export default function HomeScreen({ navigation }) {
   ]);
 
   useEffect(() => {
-    loadData();
+    initializeUser();
     
     // Staggered entrance animation
     Animated.parallel([
@@ -55,13 +61,59 @@ export default function HomeScreen({ navigation }) {
     });
   }, []);
 
+  const initializeUser = async () => {
+    try {
+      const { data: { user } } = await auth.getCurrentUser();
+      if (user) {
+        setUserId(user.id);
+        await Promise.all([
+          loadData(user.id),
+          checkPremiumStatus(user.id)
+        ]);
+      }
+    } catch (error) {
+      console.error('Error initializing user:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const checkPremiumStatus = async (uid) => {
+    try {
+      const { data } = await userProfiles.isPremium(uid);
+      setIsPremium(data);
+      const { data: count } = await habitsService.getHabitCount(uid);
+      setHabitCount(count || 0);
+    } catch (error) {
+      console.error('Error checking premium status:', error);
+    }
+  };
+
+  // Add a header right button to toggle theme mode (system -> dark -> light)
+  useEffect(() => {
+    const cycleMode = () => {
+      const next = colorMode === 'system' ? 'dark' : colorMode === 'dark' ? 'light' : 'system';
+      setColorMode(next);
+    };
+
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity onPress={cycleMode} style={{ marginRight: 12 }}>
+          <Ionicons name={colorMode === 'dark' ? 'moon' : colorMode === 'light' ? 'sunny' : 'color-filter'} size={22} color={theme.colors.text} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, colorMode, setColorMode, theme.colors.text]);
+
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      loadData();
+      if (userId) {
+        loadData(userId);
+      }
     });
 
     return unsubscribe;
-  }, [navigation]);
+  }, [navigation, userId]);
 
   useEffect(() => {
     // Animate progress bar when progress changes
@@ -73,20 +125,25 @@ export default function HomeScreen({ navigation }) {
     }).start();
   }, [todaysProgress]);
 
-  const loadData = async () => {
+  const loadData = async (uid) => {
     try {
-      const storedHabits = await AsyncStorage.getItem('habits');
-      const storedCompletions = await AsyncStorage.getItem('completions');
-      
-      if (storedHabits) {
-        setHabits(JSON.parse(storedHabits));
+      // Load habits from Supabase
+      const { data: habitsData, error: habitsError } = await habitsService.getAll(uid);
+      if (habitsError) {
+        console.error('Error loading habits:', habitsError);
+        return;
       }
       
-      if (storedCompletions) {
-        const completionsData = JSON.parse(storedCompletions);
-        setCompletions(completionsData);
-        calculateTodaysProgress(JSON.parse(storedHabits) || [], completionsData);
+      // Load completions from Supabase
+      const { data: completionsData, error: completionsError } = await habitCompletions.getAll(uid);
+      if (completionsError) {
+        console.error('Error loading completions:', completionsError);
+        return;
       }
+      
+      setHabits(habitsData || []);
+      setCompletions(completionsData || []);
+      calculateTodaysProgress(habitsData || [], completionsData || []);
     } catch (error) {
       console.error('Error loading data:', error);
     }
@@ -120,15 +177,15 @@ export default function HomeScreen({ navigation }) {
 
   const getStreakData = () => {
     const streaks = habits.map(habit => {
-      const habitCompletions = completions
-        .filter(c => c.habitId === habit.id)
+      const habitCompletionsList = completions
+        .filter(c => c.habit_id === habit.id)
         .sort((a, b) => new Date(b.date) - new Date(a.date));
 
       let streak = 0;
       const today = new Date();
       
-      for (let i = 0; i < habitCompletions.length; i++) {
-        const completionDate = new Date(habitCompletions[i].date);
+      for (let i = 0; i < habitCompletionsList.length; i++) {
+        const completionDate = new Date(habitCompletionsList[i].date);
         const daysDiff = Math.floor((today - completionDate) / (1000 * 60 * 60 * 24));
         
         if (daysDiff === streak) {
@@ -177,6 +234,14 @@ export default function HomeScreen({ navigation }) {
 
   const topStreaks = getStreakData().slice(0, 3);
   const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <Animated.ScrollView 
@@ -271,6 +336,56 @@ export default function HomeScreen({ navigation }) {
             </Animated.View>
           ))}
         </Animated.View>
+      )}
+
+      {/* Premium Status Card */}
+      {!isPremium && (
+        <AnimatedTouchableOpacity 
+          style={[styles.premiumCard, { opacity: fadeAnim }]}
+          onPress={() => handleButtonPress(() => navigation.navigate('Payment'))}
+          activeOpacity={0.8}
+        >
+          <View style={styles.premiumContent}>
+            <View style={styles.premiumIconContainer}>
+              <Ionicons name="star" size={32} color="#FFD700" />
+            </View>
+            <View style={styles.premiumTextContainer}>
+              <Text style={styles.premiumTitle}>Upgrade to Premium</Text>
+              <Text style={styles.premiumSubtitle}>
+                {habitCount >= habitLimit 
+                  ? `You've reached the ${habitLimit} habit limit • Unlock unlimited habits!`
+                  : 'Unlock unlimited habits, advanced analytics & more'
+                }
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color={theme.colors.textSecondary} />
+          </View>
+          {habitCount >= habitLimit && (
+            <View style={styles.limitBanner}>
+              <Ionicons name="alert-circle" size={16} color="#FF9800" />
+              <Text style={styles.limitBannerText}>
+                {habitCount}/{habitLimit} habits used
+              </Text>
+            </View>
+          )}
+        </AnimatedTouchableOpacity>
+      )}
+
+      {/* Premium Badge for Premium Users */}
+      {isPremium && (
+        <AnimatedTouchableOpacity 
+          style={[styles.premiumBadgeCard, { opacity: fadeAnim }]}
+          onPress={() => handleButtonPress(() => navigation.navigate('PremiumFeatures'))}
+          activeOpacity={0.8}
+        >
+          <View style={styles.premiumBadgeContent}>
+            <View style={styles.premiumBadgeIcon}>
+              <Ionicons name="star" size={20} color="#FFD700" />
+            </View>
+            <Text style={styles.premiumBadgeText}>Premium Member</Text>
+            <Text style={styles.premiumBadgeSubtext}>• Tap to view features</Text>
+          </View>
+        </AnimatedTouchableOpacity>
       )}
 
       <View style={styles.actionsContainer}>
@@ -465,5 +580,89 @@ const createStyles = (theme) => StyleSheet.create({
   },
   secondaryButtonText: {
     color: theme.colors.primary,
+  },
+  premiumCard: {
+    backgroundColor: 'rgba(255, 215, 0, 0.1)',
+    marginHorizontal: spacing.md,
+    marginVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderWidth: 2,
+    borderColor: '#FFD700',
+    overflow: 'hidden',
+    ...getShadowStyle(theme, 'default'),
+  },
+  premiumContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+  },
+  premiumIconContainer: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(255, 215, 0, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  premiumTextContainer: {
+    flex: 1,
+    marginLeft: spacing.md,
+  },
+  premiumTitle: {
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.bold,
+    color: theme.colors.text,
+  },
+  premiumSubtitle: {
+    fontSize: fontSize.sm,
+    color: theme.colors.textSecondary,
+    marginTop: spacing.xs,
+  },
+  limitBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 152, 0, 0.2)',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    justifyContent: 'center',
+  },
+  limitBannerText: {
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+    color: '#FF9800',
+    marginLeft: spacing.xs,
+  },
+  premiumBadgeCard: {
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    marginHorizontal: spacing.md,
+    marginVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(76, 175, 80, 0.3)',
+    ...getShadowStyle(theme, 'small'),
+  },
+  premiumBadgeContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+  },
+  premiumBadgeIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 215, 0, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  premiumBadgeText: {
+    fontSize: fontSize.md,
+    fontWeight: fontWeight.bold,
+    color: theme.colors.text,
+    marginLeft: spacing.sm,
+  },
+  premiumBadgeSubtext: {
+    fontSize: fontSize.sm,
+    color: theme.colors.textSecondary,
+    marginLeft: spacing.xs,
   },
 });

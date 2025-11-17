@@ -1,10 +1,12 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View, useColorScheme } from 'react-native';
+import { StyleSheet, Text, View, useColorScheme, ActivityIndicator } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from './constants/Theme';
+import React, { useState, useEffect } from 'react';
+import { useTheme, ThemeProvider } from './constants/Theme';
+import { auth } from './services/supabaseService';
 import LoginScreen from './screens/LoginScreen';
 import RegisterScreen from './screens/RegisterScreen';
 import HomeScreen from './screens/HomeScreen';
@@ -71,18 +73,62 @@ function TabNavigator() {
 }
 
 export default function App() {
-  const colorScheme = useColorScheme();
-  
-  // Create custom navigation themes based on our design system
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
+  );
+}
+
+function AppContent() {
+  const { colors, isDark } = useTheme();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    // Check initial auth state
+    checkAuthState();
+
+    // Listen for auth state changes
+    const unsubscribe = auth.onAuthStateChange((event, session) => {
+      setIsAuthenticated(!!session);
+      setIsLoading(false);
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
+
+  const checkAuthState = async () => {
+    try {
+      const { data: { user } } = await auth.getCurrentUser();
+      setIsAuthenticated(!!user);
+    } catch (error) {
+      console.error('Error checking auth state:', error);
+      setIsAuthenticated(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
   const customLightTheme = {
     ...DefaultTheme,
     colors: {
       ...DefaultTheme.colors,
-      background: '#FFFFFF',
-      card: '#FFFFFF',
-      text: '#1C1C1E',
-      border: '#E5E5EA',
-      primary: '#007AFF',
+      background: colors.background || '#FFFFFF',
+      card: colors.card || '#FFFFFF',
+      text: colors.text || '#1C1C1E',
+      border: colors.cardBorder || '#E5E5EA',
+      primary: colors.primary || '#007AFF',
     },
   };
 
@@ -90,18 +136,18 @@ export default function App() {
     ...DarkTheme,
     colors: {
       ...DarkTheme.colors,
-      background: '#000000',
-      card: '#1C1C1E',
-      text: '#FFFFFF',
-      border: '#38383A',
-      primary: '#0A84FF',
+      background: colors.background || '#000000',
+      card: colors.card || '#1C1C1E',
+      text: colors.text || '#FFFFFF',
+      border: colors.cardBorder || '#38383A',
+      primary: colors.primary || '#0A84FF',
     },
   };
 
   return (
-    <NavigationContainer theme={colorScheme === 'dark' ? customDarkTheme : customLightTheme}>
-      <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
-      <Stack.Navigator initialRouteName="Login">
+    <NavigationContainer theme={isDark ? customDarkTheme : customLightTheme}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <Stack.Navigator initialRouteName={isAuthenticated ? "Main" : "Login"} screenOptions={{ gestureEnabled: false }}>
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Payment" component={PaymentScreen} options={{ title: 'Subscription' }} />
