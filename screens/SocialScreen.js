@@ -460,7 +460,7 @@ const createStyles = (theme) => StyleSheet.create({
     paddingVertical: spacing.md,
     borderRadius: borderRadius.full,
     alignItems: 'center',
-    ...getShadowStyle(2),
+    ...getShadowStyle(theme, 'default'),
   },
   upgradeButtonText: {
     color: '#FFFFFF',
@@ -504,7 +504,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderRadius: borderRadius.lg,
     padding: spacing.md,
     marginBottom: spacing.sm,
-    ...getShadowStyle(1),
+    ...getShadowStyle(theme, 'small'),
   },
   userInfo: {
     flexDirection: 'row',
@@ -589,7 +589,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderRadius: borderRadius.lg,
     padding: spacing.md,
     marginBottom: spacing.sm,
-    ...getShadowStyle(1),
+    ...getShadowStyle(theme, 'small'),
   },
   currentUserCard: {
     backgroundColor: theme.colors.primary + '20',
@@ -640,7 +640,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderRadius: borderRadius.lg,
     padding: spacing.md,
     marginBottom: spacing.sm,
-    ...getShadowStyle(1),
+    ...getShadowStyle(theme, 'small'),
   },
   modalOverlay: {
     flex: 1,
@@ -682,7 +682,7 @@ const createStyles = (theme) => StyleSheet.create({
     paddingVertical: spacing.md,
     borderRadius: borderRadius.md,
     alignItems: 'center',
-    ...getShadowStyle(2),
+    ...getShadowStyle(theme, 'default'),
   },
   sendButtonText: {
     color: '#FFFFFF',

@@ -391,7 +391,7 @@ export default function HomeScreen({ navigation }) {
       <View style={styles.actionsContainer}>
         <AnimatedTouchableOpacity 
           style={styles.actionButton}
-          onPress={() => handleButtonPress(() => navigation.navigate('Habits'))}
+          onPress={() => handleButtonPress(() => navigation.getParent().navigate('Habits'))}
           activeOpacity={0.8}
         >
           <Ionicons name="checkmark-done" size={24} color="white" />
@@ -400,7 +400,7 @@ export default function HomeScreen({ navigation }) {
         
         <AnimatedTouchableOpacity 
           style={[styles.actionButton, styles.secondaryButton]}
-          onPress={() => handleButtonPress(() => navigation.navigate('Statistics'))}
+          onPress={() => handleButtonPress(() => navigation.getParent().navigate('Statistics'))}
           activeOpacity={0.8}
         >
           <Ionicons name="bar-chart" size={24} color={theme.colors.primary} />

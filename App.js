@@ -1,5 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View, useColorScheme, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, View, useColorScheme, ActivityIndicator, TouchableOpacity, Image } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -29,9 +29,32 @@ function CustomDrawerContent(props) {
   const theme = useTheme();
   const [isPremium, setIsPremium] = useState(false);
   const [userId, setUserId] = useState(null);
+  const [profileRow, setProfileRow] = useState(null);
 
   useEffect(() => {
     checkPremium();
+  }, []);
+
+  // Fetch profile row for sidebar display
+  useEffect(() => {
+    let mounted = true;
+    const loadProfileRow = async () => {
+      try {
+        const { data: { user } } = await auth.getCurrentUser();
+        if (!user) return;
+        const { data: profileData, error } = await userProfiles.get(user.id);
+        if (error) {
+          console.warn('Failed to load profile for drawer header:', error);
+          return;
+        }
+        if (mounted) setProfileRow(profileData);
+      } catch (err) {
+        console.error('Error loading drawer profile:', err);
+      }
+    };
+
+    loadProfileRow();
+    return () => { mounted = false; };
   }, []);
 
   const checkPremium = async () => {
@@ -119,12 +142,17 @@ function CustomDrawerContent(props) {
             backgroundColor: '#FFFFFF',
             alignItems: 'center',
             justifyContent: 'center',
+            overflow: 'hidden'
           }}>
-            <Ionicons name="person" size={32} color={theme.colors.primary} />
+            {profileRow?.avatar_url ? (
+              <Image source={{ uri: profileRow.avatar_url }} style={{ width: 60, height: 60 }} />
+            ) : (
+              <Ionicons name="person" size={32} color={theme.colors.primary} />
+            )}
           </View>
           <View style={{ marginLeft: 15, flex: 1 }}>
             <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: 'bold' }}>
-              Habit Tracker
+              {profileRow?.username || 'Habit Tracker'}
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
               {isPremium ? (
@@ -319,6 +347,27 @@ function DrawerNavigator() {
         }}
       />
       <Drawer.Screen 
+        name="Habits" 
+        component={HabitsScreen}
+        options={{
+          title: 'Habits',
+        }}
+      />
+      <Drawer.Screen 
+        name="Statistics" 
+        component={StatisticsScreen}
+        options={{
+          title: 'Statistics',
+        }}
+      />
+      <Drawer.Screen 
+        name="Profile" 
+        component={ProfileScreen}
+        options={{
+          title: 'Profile',
+        }}
+      />
+      <Drawer.Screen 
         name="Challenges" 
         component={ChallengesScreen}
         options={{
@@ -344,6 +393,13 @@ function DrawerNavigator() {
         component={PremiumFeaturesScreen}
         options={{
           title: 'Premium Features',
+        }}
+      />
+      <Drawer.Screen 
+        name="Payment" 
+        component={PaymentScreen}
+        options={{
+          title: 'Subscription',
         }}
       />
     </Drawer.Navigator>
@@ -428,7 +484,6 @@ function AppContent() {
       <Stack.Navigator initialRouteName={isAuthenticated ? "Main" : "Login"} screenOptions={{ gestureEnabled: false }}>
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="Payment" component={PaymentScreen} options={{ title: 'Subscription' }} />
         <Stack.Screen name="Main" component={DrawerNavigator} options={{ headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>

@@ -16,8 +16,13 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
+import * as SecureStore from 'expo-secure-store';
+import * as LocalAuthentication from 'expo-local-authentication';
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
+import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle, responsive } from '../constants/Theme';
+import { auth, userProfiles, habits, subscriptionTable, storage, habitCompletions } from '../services/supabaseService';
+import { AnimatedPressable } from '../ui/animations';
 
 export default function ProfileScreen({ navigation }) {
   const theme = useTheme();
@@ -25,7 +30,8 @@ export default function ProfileScreen({ navigation }) {
   const [profile, setProfile] = useState({
     username: '',
     email: '',
-    profileImage: null
+    profileImage: null,
+    id: null,
   });
   const [settings, setSettings] = useState({
     darkMode: false,
@@ -33,8 +39,10 @@ export default function ProfileScreen({ navigation }) {
     soundEnabled: true,
     hapticFeedback: true,
     weeklyReports: true,
-    reminderFrequency: 'daily'
+    reminderFrequency: 'daily',
+    biometricEnabled: false
   });
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [editing, setEditing] = useState(false);
   const [tempProfile, setTempProfile] = useState({ ...profile });
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
@@ -48,9 +56,9 @@ export default function ProfileScreen({ navigation }) {
   const [buttonScale] = useState(new Animated.Value(1));
 
   useEffect(() => {
-    loadProfile();
+    fetchProfileData();
     loadSettings();
-    
+    checkBiometricAvailability();
     // Initial animation
     Animated.parallel([
       Animated.timing(fadeAnim, {
@@ -74,6 +82,121 @@ export default function ProfileScreen({ navigation }) {
     ]).start();
   }, []);
 
+  const [loading, setLoading] = useState(true);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [stats, setStats] = useState({ habitsCount: 0, completionsCount: 0, currentStreak: 0 });
+  const [subscription, setSubscription] = useState({ plan: 'free', active: false, tier: '', status: '', endsAt: null });
+
+  const fetchProfileData = async () => {
+    setLoading(true);
+    try {
+      // Get current user
+      const { data: { user } } = await auth.getCurrentUser();
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+      // Get profile and map DB avatar_url -> profileImage for UI
+      const { data: userProfile } = await userProfiles.get(user.id);
+      setProfile({
+        username: userProfile?.username || '',
+        email: userProfile?.email || '',
+        profileImage: userProfile?.avatar_url || null,
+        id: user.id,
+      });
+      // keep tempProfile in sync so edit form shows current values
+      setTempProfile({
+        username: userProfile?.username || '',
+        email: userProfile?.email || '',
+        profileImage: userProfile?.avatar_url || null,
+        id: user.id,
+      });
+      // tempProfile already synced above (use DB's avatar_url mapping)
+      // Get habit count
+      const { data: habitCount } = await habits.getHabitCount(user.id);
+      // Compute current streak from completions (timezone-aware)
+      const { data: completionsData } = await habitCompletions.getAll(user.id);
+      let currentStreak = 0;
+      try {
+        if (completionsData && completionsData.length > 0) {
+          // Build a set of completion dates in ISO date format (YYYY-MM-DD)
+          const dateSet = new Set(
+            completionsData
+              .map(c => {
+                if (!c || c.date == null) return null;
+                // If the value is already a string like 'YYYY-MM-DD', use it directly
+                if (typeof c.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(c.date)) return c.date;
+                // Otherwise normalize via UTC to avoid local timezone shifts
+                const d = new Date(c.date);
+                return d.toISOString().slice(0,10);
+              })
+              .filter(Boolean)
+          );
+
+          // Start from today (use UTC date string to match DB date values) and walk backwards
+          const now = new Date();
+          let cursor = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+          while (true) {
+            const key = cursor.toISOString().slice(0,10);
+            if (dateSet.has(key)) {
+              currentStreak += 1;
+              // move cursor back one day in UTC
+              cursor.setUTCDate(cursor.getUTCDate() - 1);
+            } else {
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        currentStreak = 0;
+      }
+      // Get subscription records (prefer subscriptions table)
+      const { data: subsRows, error: subsErr } = await subscriptionTable.getByUser(user.id);
+      // Also fetch profile-based subscription fields as a fallback/source for endsAt
+      const { data: subInfo } = await userProfiles.getSubscriptionInfo(user.id);
+
+      setStats((prev) => ({ ...prev, habitsCount: habitCount || 0, currentStreak: currentStreak || 0 }));
+
+      if (subsErr) {
+        // If subscriptions table failed, fallback to profile fields
+        setSubscription({
+          plan: subInfo?.subscription_tier || 'free',
+          active: subInfo?.subscription_status === 'active',
+          tier: subInfo?.subscription_tier || 'free',
+          status: subInfo?.subscription_status || 'inactive',
+          endsAt: subInfo?.subscription_ends_at || null,
+          isPremium: subInfo?.is_premium || false,
+        });
+      } else if (subsRows && subsRows.length > 0) {
+        // subscriptions.getByUser orders by created_at desc, take latest
+        const latest = subsRows[0];
+        setSubscription({
+          plan: latest.plan || subInfo?.subscription_tier || 'free',
+          active: (latest.status || subInfo?.subscription_status) === 'active',
+          tier: latest.plan || subInfo?.subscription_tier || 'free',
+          status: latest.status || subInfo?.subscription_status || 'inactive',
+          endsAt: subInfo?.subscription_ends_at || null,
+          isPremium: subInfo?.is_premium || (latest.plan && latest.plan !== 'free') || false,
+        });
+      } else {
+        // No subscription rows, use profile fields
+        setSubscription({
+          plan: subInfo?.subscription_tier || 'free',
+          active: subInfo?.subscription_status === 'active',
+          tier: subInfo?.subscription_tier || 'free',
+          status: subInfo?.subscription_status || 'inactive',
+          endsAt: subInfo?.subscription_ends_at || null,
+          isPremium: subInfo?.is_premium || false,
+        });
+      }
+    } catch (e) {
+      // fallback to local if error
+      loadProfile();
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Header theme toggle (system -> dark -> light)
   useEffect(() => {
     const cycleMode = () => {
@@ -84,8 +207,8 @@ export default function ProfileScreen({ navigation }) {
     navigation.setOptions({
       headerRight: () => (
         <TouchableOpacity onPress={cycleMode} style={{ marginRight: 12 }}>
-          <Ionicons name={colorMode === 'dark' ? 'moon' : colorMode === 'light' ? 'sunny' : 'color-filter'} size={22} color={theme.colors.text} />
-        </TouchableOpacity>
+            <Ionicons name={colorMode === 'dark' ? 'moon' : colorMode === 'light' ? 'sunny' : 'color-filter'} size={22} color={theme.colors.text} />
+          </TouchableOpacity>
       ),
     });
   }, [navigation, colorMode, setColorMode, theme.colors.text]);
@@ -116,10 +239,26 @@ export default function ProfileScreen({ navigation }) {
     try {
       const storedSettings = await AsyncStorage.getItem('userSettings');
       if (storedSettings) {
-        setSettings(JSON.parse(storedSettings));
+        const parsedSettings = JSON.parse(storedSettings);
+        
+        // Check if biometric is enabled
+        const biometricEnabled = await SecureStore.getItemAsync('biometric_enabled');
+        parsedSettings.biometricEnabled = biometricEnabled === 'true';
+        
+        setSettings(parsedSettings);
       }
     } catch (error) {
       console.error('Error loading settings:', error);
+    }
+  };
+
+  const checkBiometricAvailability = async () => {
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      setBiometricAvailable(hasHardware && isEnrolled);
+    } catch (error) {
+      console.log('Error checking biometric:', error);
     }
   };
 
@@ -156,13 +295,61 @@ export default function ProfileScreen({ navigation }) {
   const saveProfile = async () => {
     animateButton(async () => {
       try {
-        await AsyncStorage.setItem('userProfile', JSON.stringify(tempProfile));
-        setProfile(tempProfile);
+        setSavingProfile(true);
+        // If we have an authenticated user id, try to upload any local profile image first
+        if (tempProfile?.id) {
+          let imageUrl = tempProfile.profileImage;
+
+          // detect local uri (file:// or content:// or blob uri) and upload to Supabase storage
+          if (imageUrl && (imageUrl.startsWith('file:') || imageUrl.startsWith('content:') || imageUrl.startsWith('blob:') || !imageUrl.startsWith('http')) ) {
+            try {
+              const fileName = `${Date.now()}.jpg`;
+              const { data: uploadData, error: uploadError } = await storage.uploadProfileImage(tempProfile.id, imageUrl, fileName);
+              if (uploadError) {
+                console.warn('Failed to upload profile image:', uploadError);
+              } else if (uploadData?.publicUrl) {
+                imageUrl = uploadData.publicUrl;
+                // update tempProfile so UI and DB use the public URL
+                setTempProfile(prev => ({ ...prev, profileImage: imageUrl }));
+              }
+            } catch (err) {
+              console.warn('Profile image upload error:', err);
+            }
+          }
+
+          const upsertPayload = {
+            id: tempProfile.id,
+            username: tempProfile.username,
+            email: tempProfile.email,
+            avatar_url: imageUrl,
+          };
+
+          const { data: upserted, error: upsertErr } = await userProfiles.upsert(upsertPayload);
+          if (upsertErr) {
+            console.warn('Failed to upsert profile to Supabase, falling back to local:', upsertErr);
+            // fallback to local storage
+            await AsyncStorage.setItem('userProfile', JSON.stringify(tempProfile));
+            setProfile(tempProfile);
+          } else {
+            // use returned row (single)
+            // Map avatar_url returned by DB back to profileImage for local state
+            const mapped = upserted ? { ...upserted, profileImage: upserted.avatar_url || imageUrl } : { ...tempProfile, profileImage: imageUrl };
+            setProfile(mapped);
+            await AsyncStorage.setItem('userProfile', JSON.stringify(mapped));
+          }
+        } else {
+          // No user id — save locally only
+          await AsyncStorage.setItem('userProfile', JSON.stringify(tempProfile));
+          setProfile(tempProfile);
+        }
+
         setEditing(false);
         Alert.alert('Success', 'Profile updated successfully!');
       } catch (error) {
         console.error('Error saving profile:', error);
         Alert.alert('Error', 'Failed to save profile');
+      } finally {
+        setSavingProfile(false);
       }
     });
   };
@@ -265,9 +452,62 @@ export default function ProfileScreen({ navigation }) {
     );
   };
 
-  const toggleSetting = (key, value) => {
+  const toggleSetting = async (key, value) => {
     if (settings.hapticFeedback) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+
+    // Handle biometric toggle specially
+    if (key === 'biometricEnabled') {
+      if (value) {
+        // User wants to enable biometric
+        Alert.alert(
+          'Enable Biometric Login',
+          'You need to sign in again to enable biometric authentication. This will securely store your credentials.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Sign In',
+              onPress: () => {
+                // User needs to log out and log back in
+                Alert.alert(
+                  'Please Log Out First',
+                  'To enable biometric login, please log out and sign in again.',
+                  [
+                    { text: 'OK' }
+                  ]
+                );
+              }
+            }
+          ]
+        );
+      } else {
+        // User wants to disable biometric
+        Alert.alert(
+          'Disable Biometric Login',
+          'Are you sure you want to disable biometric authentication?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Disable',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await SecureStore.deleteItemAsync('biometric_email');
+                  await SecureStore.deleteItemAsync('biometric_password');
+                  await SecureStore.deleteItemAsync('biometric_enabled');
+                  const newSettings = { ...settings, biometricEnabled: false };
+                  saveSettings(newSettings);
+                  Alert.alert('Success', 'Biometric login disabled');
+                } catch (error) {
+                  Alert.alert('Error', 'Failed to disable biometric login');
+                }
+              }
+            }
+          ]
+        );
+      }
+      return;
     }
     
     const newSettings = { ...settings, [key]: value };
@@ -321,25 +561,7 @@ export default function ProfileScreen({ navigation }) {
     }
   };
 
-  const [stats, setStats] = useState({ habitsCount: 0, completionsCount: 0 });
 
-  useEffect(() => {
-    getStatistics().then(setStats);
-    loadSubscription();
-  }, []);
-
-  const [subscription, setSubscription] = useState({ plan: 'free', active: false });
-
-  const loadSubscription = async () => {
-    try {
-      const stored = await AsyncStorage.getItem('subscription');
-      if (stored) {
-        setSubscription(JSON.parse(stored));
-      }
-    } catch (err) {
-      console.error('Failed to load subscription', err);
-    }
-  };
 
   const saveSubscription = async (sub) => {
     try {
@@ -354,12 +576,21 @@ export default function ProfileScreen({ navigation }) {
 
   const styles = createStyles(theme);
 
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background }}>
+        <Text style={{ color: theme.colors.text, fontSize: 18 }}>Loading profile...</Text>
+      </View>
+    );
+  }
+
   return (
     <Animated.ScrollView 
       style={[styles.container, { opacity: fadeAnim }]}
       showsVerticalScrollIndicator={false}
     >
-      <Animated.View style={[styles.header, { transform: [{ translateY: slideAnim }] }]}>
+      <Animated.View style={[styles.header, { transform: [{ translateY: slideAnim }] }]}> 
         <View style={styles.profileImageContainer}>
           {renderProfileImage()}
           {editing && (
@@ -371,7 +602,6 @@ export default function ProfileScreen({ navigation }) {
             </AnimatedTouchableOpacity>
           )}
         </View>
-        
         <View style={styles.userInfo}>
           {editing ? (
             <>
@@ -391,12 +621,11 @@ export default function ProfileScreen({ navigation }) {
             </>
           ) : (
             <>
-              <Text style={styles.username}>{profile.username}</Text>
+              <Text style={[styles.username, { fontSize: fontSize.xxl }]}>{profile.username || 'No username'}</Text>
               <Text style={styles.email}>{profile.email}</Text>
             </>
           )}
         </View>
-
         <View style={styles.actionButtons}>
           {editing ? (
             <View style={styles.editActions}>
@@ -425,33 +654,39 @@ export default function ProfileScreen({ navigation }) {
         </View>
       </Animated.View>
 
-      <Animated.View style={[styles.statsSection, { transform: [{ translateY: slideAnim }] }]}>
+      <Animated.View style={[styles.statsSection, { transform: [{ translateY: slideAnim }] }]}> 
         <Text style={styles.sectionTitle}>Statistics</Text>
         <View style={styles.statsGrid}>
-          <Animated.View style={[styles.statCard, { transform: [{ scale: scaleAnim }] }]}>
+          <Animated.View style={[styles.statCard, { transform: [{ scale: scaleAnim }] }]}> 
             <Text style={styles.statNumber}>{stats.habitsCount}</Text>
             <Text style={styles.statLabel}>Total Habits</Text>
           </Animated.View>
-          <Animated.View style={[styles.statCard, { transform: [{ scale: scaleAnim }] }]}>
-            <Text style={styles.statNumber}>{stats.completionsCount}</Text>
-            <Text style={styles.statLabel}>Completions</Text>
+
+          <Animated.View style={[styles.statCard, { transform: [{ scale: scaleAnim }] }]}> 
+            <Text style={styles.statNumber}>{stats.currentStreak}</Text>
+            <Text style={styles.statLabel}>Current Streak</Text>
           </Animated.View>
         </View>
       </Animated.View>
 
-      <Animated.View style={[styles.subscriptionSection, { transform: [{ translateY: slideAnim }] }]}>
+      <Animated.View style={[styles.subscriptionSection, { transform: [{ translateY: slideAnim }] }]}> 
         <Text style={styles.sectionTitle}>Subscription</Text>
         <View style={styles.subscriptionCard}>
-          <Text style={styles.subscriptionPlan}>{subscription.plan === 'free' ? 'Free' : subscription.plan === 'personal' ? 'Personal' : 'Enterprise'}</Text>
-          <Text style={styles.subscriptionStatus}>{subscription.active ? 'Active' : 'Inactive'}</Text>
-          <TouchableOpacity
+          <Text style={[styles.subscriptionPlan, subscription.isPremium ? { color: '#FFD700' } : {}]}>
+            {subscription.tier ? subscription.tier.charAt(0).toUpperCase() + subscription.tier.slice(1) : 'Free'}
+          </Text>
+          <Text style={styles.subscriptionStatus}>{subscription.status ? subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1) : 'Inactive'}</Text>
+          {subscription.endsAt && (
+            <Text style={[styles.subscriptionStatus, { fontSize: 12 }]}>Ends: {new Date(subscription.endsAt).toLocaleDateString()}</Text>
+          )}
+          <AnimatedPressable
             style={styles.manageButton}
             onPress={() => {
               animateButton(() => navigation.navigate('Payment'));
             }}
           >
             <Text style={styles.manageButtonText}>Manage Subscription</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
       </Animated.View>
 
@@ -462,21 +697,21 @@ export default function ProfileScreen({ navigation }) {
           style={[styles.option, { transform: [{ scale: buttonScale }] }]}
           onPress={openSettingsModal}
         >
-          <Ionicons name="settings-outline" size={24} color="#007AFF" />
+          <Ionicons name="settings-outline" size={24} color={theme.colors.primary} />
           <Text style={styles.optionText}>Preferences</Text>
-          <Ionicons name="chevron-forward" size={20} color="#ccc" />
+          <Ionicons name="chevron-forward" size={20} color={theme.colors.textTertiary} />
         </AnimatedTouchableOpacity>
 
         <AnimatedTouchableOpacity 
           style={[styles.option, { transform: [{ scale: buttonScale }] }]}
           onPress={() => animateButton(() => {})}
         >
-          <Ionicons name="notifications-outline" size={24} color="#007AFF" />
+          <Ionicons name="notifications-outline" size={24} color={theme.colors.primary} />
           <Text style={styles.optionText}>Notifications</Text>
           <Switch
             value={settings.notifications}
             onValueChange={(value) => toggleSetting('notifications', value)}
-            trackColor={{ false: '#767577', true: '#007AFF' }}
+            trackColor={{ false: theme.colors.cardBorder || '#767577', true: theme.colors.primary }}
             thumbColor={settings.notifications ? '#fff' : '#f4f3f4'}
           />
         </AnimatedTouchableOpacity>
@@ -485,18 +720,18 @@ export default function ProfileScreen({ navigation }) {
           style={[styles.option, { transform: [{ scale: buttonScale }] }]}
           onPress={openHelpModal}
         >
-          <Ionicons name="help-circle-outline" size={24} color="#007AFF" />
+          <Ionicons name="help-circle-outline" size={24} color={theme.colors.primary} />
           <Text style={styles.optionText}>Help & Support</Text>
-          <Ionicons name="chevron-forward" size={20} color="#ccc" />
+          <Ionicons name="chevron-forward" size={20} color={theme.colors.textTertiary} />
         </AnimatedTouchableOpacity>
 
         <AnimatedTouchableOpacity 
           style={[styles.option, { transform: [{ scale: buttonScale }] }]}
           onPress={openAboutModal}
         >
-          <Ionicons name="information-circle-outline" size={24} color="#007AFF" />
+          <Ionicons name="information-circle-outline" size={24} color={theme.colors.primary} />
           <Text style={styles.optionText}>About</Text>
-          <Ionicons name="chevron-forward" size={20} color="#ccc" />
+          <Ionicons name="chevron-forward" size={20} color={theme.colors.textTertiary} />
         </AnimatedTouchableOpacity>
       </Animated.View>
 
@@ -554,12 +789,27 @@ export default function ProfileScreen({ navigation }) {
               />
             </View>
 
+            {biometricAvailable && (
+              <View style={styles.settingItem}>
+                <View style={styles.settingLabelContainer}>
+                  <Ionicons name="finger-print" size={20} color={theme.colors.primary} style={{ marginRight: 8 }} />
+                  <Text style={styles.settingLabel}>Biometric Login</Text>
+                </View>
+                <Switch
+                  value={settings.biometricEnabled}
+                  onValueChange={(value) => toggleSetting('biometricEnabled', value)}
+                  trackColor={{ false: theme.colors.cardBorder || '#767577', true: theme.colors.primary }}
+                  thumbColor={settings.biometricEnabled ? '#fff' : '#f4f3f4'}
+                />
+              </View>
+            )}
+
             <View style={styles.settingItem}>
               <Text style={styles.settingLabel}>Weekly Reports</Text>
               <Switch
                 value={settings.weeklyReports}
                 onValueChange={(value) => toggleSetting('weeklyReports', value)}
-                trackColor={{ false: '#767577', true: '#007AFF' }}
+                trackColor={{ false: theme.colors.cardBorder || '#767577', true: theme.colors.primary }}
                 thumbColor={settings.weeklyReports ? '#fff' : '#f4f3f4'}
               />
             </View>
@@ -672,23 +922,23 @@ function createStyles(theme) {
       padding: spacing.lg,
       alignItems: 'center',
       borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
+      borderBottomColor: theme.colors.cardBorder,
     },
     profileImageContainer: {
       position: 'relative',
       marginBottom: spacing.md,
     },
     profileImage: {
-      width: 100,
-      height: 100,
-      borderRadius: 50,
+      width: responsive.moderateScale(96),
+      height: responsive.moderateScale(96),
+      borderRadius: responsive.moderateScale(48),
       borderWidth: 3,
       borderColor: theme.colors.primary,
     },
     defaultProfileImage: {
-      width: 100,
-      height: 100,
-      borderRadius: 50,
+      width: responsive.moderateScale(96),
+      height: responsive.moderateScale(96),
+      borderRadius: responsive.moderateScale(48),
       backgroundColor: theme.colors.muted,
       alignItems: 'center',
       justifyContent: 'center',
@@ -697,12 +947,12 @@ function createStyles(theme) {
     },
     cameraIcon: {
       position: 'absolute',
-      bottom: 5,
-      right: 5,
+      bottom: responsive.moderateScale(6),
+      right: responsive.moderateScale(6),
       backgroundColor: theme.colors.primary,
-      borderRadius: 15,
-      width: 30,
-      height: 30,
+      borderRadius: responsive.moderateScale(14),
+      width: responsive.moderateScale(28),
+      height: responsive.moderateScale(28),
       alignItems: 'center',
       justifyContent: 'center',
       ...getShadowStyle(theme, 5),
@@ -808,10 +1058,10 @@ function createStyles(theme) {
       backgroundColor: theme.colors.surface,
       padding: spacing.lg,
       borderRadius: borderRadius.md,
-      minWidth: 100,
+      minWidth: responsive.scale(110),
     },
     statNumber: {
-      fontSize: 28,
+      fontSize: responsive.moderateScale(26),
       fontWeight: fontWeight.bold,
       color: theme.colors.primary,
     },
@@ -860,16 +1110,17 @@ function createStyles(theme) {
       margin: spacing.md,
       marginTop: 0,
       borderRadius: borderRadius.lg,
-      paddingVertical: spacing.xs,
+      padding: spacing.md,
+      overflow: 'hidden',
       ...getShadowStyle(theme, 3),
     },
     option: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingHorizontal: spacing.lg,
+      paddingHorizontal: 0,
       paddingVertical: spacing.md,
       borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
+      borderBottomColor: theme.colors.cardBorder,
     },
     optionText: {
       flex: 1,
@@ -917,7 +1168,7 @@ function createStyles(theme) {
       alignItems: 'center',
       padding: spacing.lg,
       borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
+      borderBottomColor: theme.colors.cardBorder,
     },
     modalTitle: {
       fontSize: fontSize.xl,
@@ -931,12 +1182,16 @@ function createStyles(theme) {
       paddingHorizontal: spacing.lg,
       paddingVertical: spacing.md,
       borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
+      borderBottomColor: theme.colors.cardBorder,
     },
     settingLabel: {
       fontSize: fontSize.md,
       color: theme.colors.text,
       fontWeight: fontWeight.medium,
+    },
+    settingLabelContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
     },
     aboutContent: {
       padding: spacing.lg,
@@ -960,7 +1215,7 @@ function createStyles(theme) {
       fontSize: fontSize.md,
       color: theme.colors.textSecondary,
       textAlign: 'center',
-      lineHeight: 24,
+      lineHeight: responsive.moderateScale(24),
       marginBottom: spacing.md,
     },
     developer: {

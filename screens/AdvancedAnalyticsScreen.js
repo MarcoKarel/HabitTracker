@@ -362,7 +362,7 @@ const createStyles = (theme) => StyleSheet.create({
     marginHorizontal: spacing.xs,
     alignItems: 'center',
     borderLeftWidth: 4,
-    ...getShadowStyle(2),
+    ...getShadowStyle(theme, 'default'),
   },
   statValue: {
     fontSize: fontSize.xxl,
@@ -380,7 +380,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderRadius: borderRadius.lg,
     padding: spacing.md,
     marginVertical: spacing.md,
-    ...getShadowStyle(2),
+    ...getShadowStyle(theme, 'default'),
   },
   chartTitle: {
     fontSize: fontSize.lg,
@@ -408,7 +408,7 @@ const createStyles = (theme) => StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.sm,
     alignItems: 'center',
-    ...getShadowStyle(1),
+    ...getShadowStyle(theme, 'small'),
   },
   insightContent: {
     marginLeft: spacing.md,
@@ -477,7 +477,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderRadius: borderRadius.full,
     alignItems: 'center',
     marginTop: spacing.lg,
-    ...getShadowStyle(3),
+    ...getShadowStyle(theme, 'large'),
   },
   upgradeButtonText: {
     color: '#FFFFFF',

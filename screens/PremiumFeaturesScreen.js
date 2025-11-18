@@ -485,7 +485,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     marginBottom: spacing.lg,
-    ...getShadowStyle(2),
+    ...getShadowStyle(theme, 'default'),
   },
   statusHeader: {
     flexDirection: 'row',
@@ -514,7 +514,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderRadius: borderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
-    ...getShadowStyle(2),
+    ...getShadowStyle(theme, 'default'),
   },
   upgradeButtonText: {
     color: '#FFFFFF',
@@ -536,7 +536,7 @@ const createStyles = (theme) => StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.sm,
     alignItems: 'center',
-    ...getShadowStyle(1),
+    ...getShadowStyle(theme, 'small'),
   },
   lockedFeature: {
     opacity: 0.7,
@@ -599,7 +599,7 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.colors.card,
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
-    ...getShadowStyle(2),
+    ...getShadowStyle(theme, 'default'),
   },
   ctaButton: {
     flexDirection: 'row',
@@ -610,7 +610,7 @@ const createStyles = (theme) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: spacing.lg,
-    ...getShadowStyle(3),
+    ...getShadowStyle(theme, 'large'),
   },
   ctaButtonText: {
     color: '#FFFFFF',

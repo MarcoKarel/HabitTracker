@@ -1,0 +1,222 @@
+[
+  {
+    "name": "7-Day Mindful Mornings",
+    "description": "Wake up 10 minutes earlier and follow a short mindfulness or breathing routine each morning.",
+    "duration_days": 7,
+    "required_completions": 7,
+    "difficulty": "easy",
+    "color": "#FF6B6B",
+    "icon": "sunny",
+    "is_premium": false,
+    "popularity": 85
+  },
+  {
+    "name": "14-Day Gratitude Journal",
+    "description": "Write three things you are grateful for every evening to build an attitude of gratitude.",
+    "duration_days": 14,
+    "required_completions": 14,
+    "difficulty": "easy",
+    "color": "#FFD93D",
+    "icon": "book",
+    "is_premium": false,
+    "popularity": 78
+  },
+  {
+    "name": "21-Day Walk Streak",
+    "description": "Walk at least 20 minutes every day — get moving and clear your head.",
+    "duration_days": 21,
+    "required_completions": 21,
+    "difficulty": "medium",
+    "color": "#4CAF50",
+    "icon": "walk",
+    "is_premium": false,
+    "popularity": 92
+  },
+  {
+    "name": "30-Day Water Boost",
+    "description": "Drink 8 glasses of water each day to stay hydrated and feel better.",
+    "duration_days": 30,
+    "required_completions": 30,
+    "difficulty": "easy",
+    "color": "#34C6F1",
+    "icon": "water",
+    "is_premium": false,
+    "popularity": 90
+  },
+  {
+    "name": "14-Day No-Snooze",
+    "description": "Get out of bed on first alarm — break the snooze habit and start your day strong.",
+    "duration_days": 14,
+    "required_completions": 14,
+    "difficulty": "medium",
+    "color": "#FF8C42",
+    "icon": "alarm",
+    "is_premium": false,
+    "popularity": 70
+  },
+  {
+    "name": "30-Day Read Daily",
+    "description": "Read at least 20 minutes every day to build knowledge and focus.",
+    "duration_days": 30,
+    "required_completions": 30,
+    "difficulty": "easy",
+    "color": "#7F5AF0",
+    "icon": "book-outline",
+    "is_premium": false,
+    "popularity": 88
+  },
+  {
+    "name": "14-Day Evening Screen-Free",
+    "description": "Avoid screens for 1 hour before bed to improve sleep quality.",
+    "duration_days": 14,
+    "required_completions": 14,
+    "difficulty": "medium",
+    "color": "#FF6BAC",
+    "icon": "eye-off",
+    "is_premium": false,
+    "popularity": 66
+  },
+  {
+    "name": "21-Day Push-Up Builder",
+    "description": "Do a short push-up set each day, gradually increasing reps to build upper-body strength.",
+    "duration_days": 21,
+    "required_completions": 21,
+    "difficulty": "medium",
+    "color": "#F44336",
+    "icon": "barbell",
+    "is_premium": false,
+    "popularity": 75
+  },
+  {
+    "name": "30-Day Plank Challenge",
+    "description": "Hold a plank daily and increase duration over 30 days to build core strength.",
+    "duration_days": 30,
+    "required_completions": 30,
+    "difficulty": "hard",
+    "color": "#FF4D6D",
+    "icon": "fitness",
+    "is_premium": false,
+    "popularity": 72
+  },
+  {
+    "name": "14-Day Sugar Cut",
+    "description": "Avoid added sugars and sugary drinks for two weeks to reset cravings.",
+    "duration_days": 14,
+    "required_completions": 14,
+    "difficulty": "hard",
+    "color": "#C62828",
+    "icon": "cafe",
+    "is_premium": true,
+    "popularity": 60
+  },
+  {
+    "name": "7-Day Daily Stretch",
+    "description": "Spend 10 minutes stretching each day to improve mobility and reduce stiffness.",
+    "duration_days": 7,
+    "required_completions": 7,
+    "difficulty": "easy",
+    "color": "#00B894",
+    "icon": "body",
+    "is_premium": false,
+    "popularity": 80
+  },
+  {
+    "name": "30-Day Language Sprint",
+    "description": "Practice a new language for 15 minutes each day to build fluency.",
+    "duration_days": 30,
+    "required_completions": 30,
+    "difficulty": "medium",
+    "color": "#6C5CE7",
+    "icon": "language",
+    "is_premium": true,
+    "popularity": 55
+  },
+  {
+    "name": "10-Day Sleep Routine",
+    "description": "Follow a consistent wind-down routine each night to improve sleep quality.",
+    "duration_days": 10,
+    "required_completions": 10,
+    "difficulty": "easy",
+    "color": "#2E86AB",
+    "icon": "moon",
+    "is_premium": false,
+    "popularity": 77
+  },
+  {
+    "name": "21-Day Declutter",
+    "description": "Spend 10 minutes a day decluttering a small area — finish the month with a tidier space.",
+    "duration_days": 21,
+    "required_completions": 21,
+    "difficulty": "easy",
+    "color": "#FFB86B",
+    "icon": "trash",
+    "is_premium": false,
+    "popularity": 69
+  },
+  {
+    "name": "14-Day No Alcohol",
+    "description": "Take a two-week break from alcohol to reset your habits and energy.",
+    "duration_days": 14,
+    "required_completions": 14,
+    "difficulty": "hard",
+    "color": "#8B0000",
+    "icon": "wine",
+    "is_premium": true,
+    "popularity": 50
+  },
+  {
+    "name": "30-Day Coding Streak",
+    "description": "Code for at least 20 minutes every day to build consistency and momentum.",
+    "duration_days": 30,
+    "required_completions": 30,
+    "difficulty": "medium",
+    "color": "#0EA5A4",
+    "icon": "code-slash",
+    "is_premium": false,
+    "popularity": 82
+  },
+  {
+    "name": "14-Day Cold Shower",
+    "description": "Finish your shower with 30–60 seconds of cold water to boost alertness and resilience.",
+    "duration_days": 14,
+    "required_completions": 14,
+    "difficulty": "hard",
+    "color": "#00A3E0",
+    "icon": "thermometer",
+    "is_premium": false,
+    "popularity": 40
+  },
+  {
+    "name": "7-Day Flossing",
+    "description": "Floss every day for a week to build a lasting oral hygiene habit.",
+    "duration_days": 7,
+    "required_completions": 7,
+    "difficulty": "easy",
+    "color": "#FF6F91",
+    "icon": "brush",
+    "is_premium": false,
+    "popularity": 65
+  },
+  {
+    "name": "30-Day 10k Steps",
+    "description": "Aim for 10,000 steps per day for 30 days to build endurance and daily activity.",
+    "duration_days": 30,
+    "required_completions": 30,
+    "difficulty": "hard",
+    "color": "#3B82F6",
+    "icon": "walk",
+    "is_premium": true,
+    "popularity": 86
+  },
+  {
+    "name": "14-Day Digital Declutter",
+    "description": "Unsubscribe, organize, and delete files/emails for 15 minutes daily to declutter your digital life.",
+    "duration_days": 14,
+    "required_completions": 14,
+    "difficulty": "easy",
+    "color": "#9CA3AF",
+    "icon": "trash-outline",
+    "is_premium": false,
+    "popularity": 58
+  }
+]

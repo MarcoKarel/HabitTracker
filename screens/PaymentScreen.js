@@ -2,7 +2,8 @@ import React, {useState, useRef, useEffect} from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useTheme, spacing, borderRadius, fontSize } from '../constants/Theme';
-import { auth, userProfiles } from '../services/supabaseService';
+import { auth, userProfiles, subscriptionTable } from '../services/supabaseService';
+import { AnimatedPressable } from '../ui/animations';
 
 // PRODUCTION NOTE: For production deployments, implement a server-side notify_url (webhook)
 // to receive PayFast IPN notifications. The server should verify the payment signature and
@@ -43,14 +44,28 @@ export default function PaymentScreen({ navigation }) {
       const endsAt = new Date();
       endsAt.setDate(endsAt.getDate() + 30);
 
-      const { data, error } = await userProfiles.updateSubscription(currentUser.id, {
+      // Update user profile subscription fields
+      const { data: profileData, error: profileError } = await userProfiles.updateSubscription(currentUser.id, {
         tier: tier,
         status: 'active',
         endsAt: endsAt.toISOString(),
       });
 
-      if (error) {
-        console.error('Subscription update error:', error);
+      // Save to subscriptions table (for premium tracking)
+      let plan = tier;
+      let provider = 'payfast';
+      let provider_subscription_id = null; // You can set this if you have a real provider subscription ID
+      let status = 'active';
+      await subscriptionTable.create({
+        user_id: currentUser.id,
+        provider,
+        provider_subscription_id,
+        plan,
+        status,
+      });
+
+      if (profileError) {
+        console.error('Subscription update error:', profileError);
         Alert.alert('Error', 'Failed to update subscription. Please contact support.');
         return false;
       }
@@ -150,9 +165,9 @@ export default function PaymentScreen({ navigation }) {
         ))}
       </View>
 
-      <TouchableOpacity style={styles.payButton} onPress={onStartPayment} activeOpacity={0.8}>
+      <AnimatedPressable style={styles.payButton} onPress={onStartPayment}>
         <Text style={styles.payButtonText}>{selectedPlan === 'free' ? 'Continue (Free)' : `Subscribe - ${plans[selectedPlan].priceLabel}`}</Text>
-      </TouchableOpacity>
+      </AnimatedPressable>
 
       {showWebview && selectedPlan !== 'free' ? (
         <View style={styles.webviewContainer}>

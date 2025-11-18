@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { useColorScheme } from 'react-native';
+import { useColorScheme, Dimensions, PixelRatio } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Light theme colors
@@ -147,13 +147,24 @@ export const useTheme = () => {
 };
 
 // Common spacing and sizing constants
+// Responsive scaling helpers
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+// Guideline sizes are based on standard ~iPhone 11/12 dimensions
+const guidelineBaseWidth = 375;
+const guidelineBaseHeight = 812;
+
+const scale = (size) => (SCREEN_WIDTH / guidelineBaseWidth) * size;
+const verticalScale = (size) => (SCREEN_HEIGHT / guidelineBaseHeight) * size;
+const moderateScale = (size, factor = 0.5) => size + (scale(size) - size) * factor;
+
+// Common spacing and sizing constants (scaled for device size)
 export const spacing = {
-  xs: 4,
-  sm: 8,
-  md: 16,
-  lg: 24,
-  xl: 32,
-  xxl: 48,
+  xs: Math.round(moderateScale(4)),
+  sm: Math.round(moderateScale(8)),
+  md: Math.round(moderateScale(16)),
+  lg: Math.round(moderateScale(24)),
+  xl: Math.round(moderateScale(32)),
+  xxl: Math.round(moderateScale(48)),
 };
 
 export const borderRadius = {
@@ -163,14 +174,15 @@ export const borderRadius = {
   xl: 24,
 };
 
+// Scaled font sizes
 export const fontSize = {
-  xs: 12,
-  sm: 14,
-  md: 16,
-  lg: 18,
-  xl: 20,
-  xxl: 24,
-  xxxl: 32,
+  xs: Math.round(moderateScale(12)),
+  sm: Math.round(moderateScale(14)),
+  md: Math.round(moderateScale(16)),
+  lg: Math.round(moderateScale(18)),
+  xl: Math.round(moderateScale(20)),
+  xxl: Math.round(moderateScale(24)),
+  xxxl: Math.round(moderateScale(32)),
 };
 
 export const fontWeight = {
@@ -203,8 +215,21 @@ export const getShadowStyle = (theme, elevation = 'default') => {
     },
   };
 
+  const shadowColor = theme?.colors?.shadow || 'rgba(0, 0, 0, 0.1)';
+
   return {
     ...elevations[elevation],
-    shadowColor: theme.colors.shadow,
+    shadowColor: shadowColor,
   };
+};
+
+// Export scaling helpers for use in components/styles
+export const responsive = {
+  scale,
+  verticalScale,
+  moderateScale,
+  SCREEN_WIDTH,
+  SCREEN_HEIGHT,
+  guidelineBaseWidth,
+  guidelineBaseHeight,
 };

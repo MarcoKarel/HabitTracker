@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -11,7 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import HabitHeatmap from '../components/HabitHeatmap';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { auth, habits as habitsService, habitCompletions, subscriptions } from '../services/supabaseService';
 import * as Haptics from 'expo-haptics';
 import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
 
@@ -21,6 +21,8 @@ export default function StatisticsScreen() {
   const [habits, setHabits] = useState([]);
   const [completions, setCompletions] = useState([]);
   const [selectedHabit, setSelectedHabit] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const subsRef = useRef({ habits: null, completions: null });
 
   // Animation values
   const [fadeAnim] = useState(new Animated.Value(0));
@@ -61,21 +63,82 @@ export default function StatisticsScreen() {
     ]).start();
   }, []);
 
+  useEffect(() => {
+    // cleanup on unmount
+    return () => {
+      try {
+        subsRef.current.habits?.();
+      } catch (e) {}
+      try {
+        subsRef.current.completions?.();
+      } catch (e) {}
+    };
+  }, []);
+
   const loadData = async () => {
     try {
-      const storedHabits = await AsyncStorage.getItem('habits');
-      const storedCompletions = await AsyncStorage.getItem('completions');
-      
-      if (storedHabits) {
-        const habitsData = JSON.parse(storedHabits);
-        setHabits(habitsData);
-        if (habitsData.length > 0) {
-          setSelectedHabit(habitsData[0]);
+      const { data: { user } } = await auth.getCurrentUser();
+      if (user && user.id) {
+        const uid = user.id;
+        setUserId(uid);
+
+        const { data: habitsData, error: habitsError } = await habitsService.getAll(uid);
+        if (habitsError) {
+          console.error('Error loading habits from Supabase:', habitsError);
+        } else {
+          setHabits(habitsData || []);
+          if ((habitsData || []).length > 0) setSelectedHabit(habitsData[0]);
         }
-      }
-      
-      if (storedCompletions) {
-        setCompletions(JSON.parse(storedCompletions));
+
+        const { data: compsData, error: compsError } = await habitCompletions.getAll(uid);
+        if (compsError) {
+          console.error('Error loading completions from Supabase:', compsError);
+        } else {
+          setCompletions(compsData || []);
+        }
+
+        // Subscribe to realtime updates so UI updates when completions/habits change
+        try {
+          subsRef.current.habits = subscriptions.subscribeToHabits(uid, (payload) => {
+            try {
+              const event = payload.event || payload.eventType || payload.type || payload.trigger || payload?.eventType;
+              const record = payload.record || payload.new || payload?.new || payload.data || payload?.record;
+              if (!record) return;
+
+              if (String(event).toUpperCase().includes('INSERT')) {
+                setHabits(prev => [record, ...prev.filter(h => h.id !== record.id)]);
+              } else if (String(event).toUpperCase().includes('DELETE')) {
+                setHabits(prev => prev.filter(h => h.id !== record.id));
+              } else if (String(event).toUpperCase().includes('UPDATE')) {
+                setHabits(prev => prev.map(h => h.id === record.id ? record : h));
+              }
+            } catch (e) { console.warn('habits subscription handler error', e); }
+          });
+
+          subsRef.current.completions = subscriptions.subscribeToCompletions(uid, (payload) => {
+            try {
+              const event = payload.event || payload.eventType || payload.type || payload.trigger || payload?.eventType;
+              const record = payload.record || payload.new || payload?.new || payload.data || payload?.record;
+              if (!record) return;
+
+              const recId = record.id || record.id;
+
+              if (String(event).toUpperCase().includes('INSERT')) {
+                setCompletions(prev => [record, ...prev.filter(c => c.id !== recId)]);
+              } else if (String(event).toUpperCase().includes('DELETE')) {
+                setCompletions(prev => prev.filter(c => c.id !== recId));
+              } else if (String(event).toUpperCase().includes('UPDATE')) {
+                setCompletions(prev => prev.map(c => (c.id === recId ? record : c)));
+              }
+            } catch (e) { console.warn('completions subscription handler error', e); }
+          });
+        } catch (e) {
+          console.warn('Failed to subscribe to realtime updates', e);
+        }
+      } else {
+        // No authenticated user — leave arrays empty
+        setHabits([]);
+        setCompletions([]);
       }
     } catch (error) {
       console.error('Error loading data:', error);
@@ -84,7 +147,7 @@ export default function StatisticsScreen() {
 
   const getStreakCount = (habitId) => {
     const habitCompletions = completions
-      .filter(c => c.habitId === habitId)
+      .filter(c => (c.habit_id || c.habitId) === habitId)
       .sort((a, b) => new Date(b.date) - new Date(a.date));
 
     let streak = 0;
@@ -105,7 +168,7 @@ export default function StatisticsScreen() {
   };
 
   const getTotalCompletions = (habitId) => {
-    return completions.filter(c => c.habitId === habitId).length;
+    return completions.filter(c => (c.habit_id || c.habitId) === habitId).length;
   };
 
   const getThisWeekCompletions = (habitId) => {
@@ -114,7 +177,7 @@ export default function StatisticsScreen() {
     weekStart.setDate(today.getDate() - today.getDay());
     
     return completions.filter(c => {
-      if (c.habitId !== habitId) return false;
+      if ((c.habit_id || c.habitId) !== habitId) return false;
       const completionDate = new Date(c.date);
       return completionDate >= weekStart && completionDate <= today;
     }).length;
@@ -125,7 +188,7 @@ export default function StatisticsScreen() {
     const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
     
     return completions.filter(c => {
-      if (c.habitId !== habitId) return false;
+      if ((c.habit_id || c.habitId) !== habitId) return false;
       const completionDate = new Date(c.date);
       return completionDate >= monthStart && completionDate <= today;
     }).length;

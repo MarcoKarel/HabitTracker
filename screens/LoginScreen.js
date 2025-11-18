@@ -13,6 +13,7 @@ import {
   Easing
 } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
+import * as SecureStore from 'expo-secure-store';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
@@ -25,6 +26,8 @@ export default function LoginScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [hasSavedCredentials, setHasSavedCredentials] = useState(false);
 
   // Animation values
   const [fadeAnim] = useState(new Animated.Value(0));
@@ -33,6 +36,9 @@ export default function LoginScreen({ navigation }) {
   const [buttonScale] = useState(new Animated.Value(1));
 
   useEffect(() => {
+    // Check biometric availability and saved credentials
+    checkBiometricAndCredentials();
+
     // Entrance animation
     Animated.parallel([
       Animated.timing(fadeAnim, {
@@ -56,29 +62,58 @@ export default function LoginScreen({ navigation }) {
     ]).start();
   }, []);
 
+  const checkBiometricAndCredentials = async () => {
+    try {
+      // Check if biometric hardware is available and enrolled
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      setBiometricAvailable(hasHardware && isEnrolled);
+
+      // Check if credentials are saved
+      const savedEmail = await SecureStore.getItemAsync('biometric_email');
+      setHasSavedCredentials(!!savedEmail);
+    } catch (error) {
+      console.log('Error checking biometric availability:', error);
+    }
+  };
+
+  const saveCredentialsForBiometric = async (email, password) => {
+    try {
+      await SecureStore.setItemAsync('biometric_email', email);
+      await SecureStore.setItemAsync('biometric_password', password);
+      await SecureStore.setItemAsync('biometric_enabled', 'true');
+      setHasSavedCredentials(true);
+    } catch (error) {
+      console.log('Error saving credentials:', error);
+    }
+  };
+
   const authenticateWithBiometrics = async () => {
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       
-      // First check if user has valid session
-      const { data: { user } } = await auth.getCurrentUser();
-      if (!user) {
+      // Check if biometric is available
+      if (!biometricAvailable) {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        Alert.alert('Please sign in first', 'You need to sign in with email and password before using biometric authentication');
+        Alert.alert('Biometric authentication not available', 'Please ensure biometric authentication is set up on your device');
         return;
       }
 
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-
-      if (!hasHardware || !isEnrolled) {
-        Alert.alert('Biometric authentication not available');
+      // Check if we have saved credentials
+      const savedEmail = await SecureStore.getItemAsync('biometric_email');
+      const savedPassword = await SecureStore.getItemAsync('biometric_password');
+      
+      if (!savedEmail || !savedPassword) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        Alert.alert('No saved credentials', 'Please sign in with email and password first to enable biometric login');
         return;
       }
 
+      // Prompt for biometric authentication
       const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Authenticate to access the app',
+        promptMessage: 'Authenticate to sign in',
         fallbackLabel: 'Use Password',
+        disableDeviceFallback: false,
       });
 
       if (result.success) {
@@ -97,14 +132,25 @@ export default function LoginScreen({ navigation }) {
             useNativeDriver: true,
           })
         ]).start();
-        
+
+        // Sign in with saved credentials
+        setLoading(true);
+        const res = await auth.signIn(savedEmail, savedPassword);
+        setLoading(false);
+
+        if (res && res.error) {
+          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          Alert.alert('Error', 'Biometric login failed. Please sign in with email and password.');
+          return;
+        }
+
         navigation.navigate('Main');
       } else {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Alert.alert('Authentication failed');
       }
     } catch (error) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      console.log('Biometric authentication error:', error);
       Alert.alert('Error', 'Biometric authentication failed');
     }
   };
@@ -144,7 +190,31 @@ export default function LoginScreen({ navigation }) {
       }
 
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      navigation.navigate('Main');
+
+      // Ask user if they want to enable biometric login
+      if (biometricAvailable && !hasSavedCredentials) {
+        Alert.alert(
+          'Enable Biometric Login?',
+          'Would you like to use biometric authentication (fingerprint/face) for faster login next time?',
+          [
+            {
+              text: 'Not Now',
+              style: 'cancel',
+              onPress: () => navigation.navigate('Main')
+            },
+            {
+              text: 'Enable',
+              onPress: async () => {
+                await saveCredentialsForBiometric(email.trim(), password);
+                Alert.alert('Success', 'Biometric login enabled! You can now use your fingerprint or face to sign in.');
+                navigation.navigate('Main');
+              }
+            }
+          ]
+        );
+      } else {
+        navigation.navigate('Main');
+      }
     } catch (error) {
       setLoading(false);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -244,14 +314,16 @@ export default function LoginScreen({ navigation }) {
             <View style={styles.dividerLine} />
           </View>
 
-          <TouchableOpacity 
-            style={styles.biometricButton}
-            onPress={authenticateWithBiometrics}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="finger-print" size={24} color={theme.colors.primary} />
-            <Text style={styles.biometricButtonText}>Use Biometric Login</Text>
-          </TouchableOpacity>
+          {biometricAvailable && hasSavedCredentials && (
+            <TouchableOpacity 
+              style={styles.biometricButton}
+              onPress={authenticateWithBiometrics}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="finger-print" size={24} color={theme.colors.primary} />
+              <Text style={styles.biometricButtonText}>Use Biometric Login</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity 
             style={styles.registerLink}

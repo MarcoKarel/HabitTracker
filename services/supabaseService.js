@@ -1,3 +1,31 @@
+// Subscription table functions
+export const subscriptionTable = {
+  create: async ({ user_id, provider, provider_subscription_id, plan, status }) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .insert({
+        user_id,
+        provider,
+        provider_subscription_id,
+        plan,
+        status,
+        created_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+    return { data, error };
+  },
+  getByUser: async (user_id) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', user_id)
+      .order('created_at', { ascending: false });
+    return { data, error };
+  },
+};
 import { createClient } from '@supabase/supabase-js';
 import { supabaseConfig } from '../config/supabase';
 
@@ -172,6 +200,59 @@ export const habits = {
   getAll: async (userId) => {
     if (!supabase) throw new Error('Supabase not configured');
     const { data, error } = await supabase.from('habits').select('*').eq('user_id', userId).eq('archived', false).order('created_at', { ascending: false });
+    return { data, error };
+  },
+
+  createFromTemplate: async (userId, templateId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+
+    // Fetch the template
+    const { data: tpl, error: tplErr } = await supabase
+      .from('challenge_templates')
+      .select('*')
+      .eq('id', templateId)
+      .single();
+
+    if (tplErr || !tpl) {
+      return { data: null, error: tplErr || { message: 'Template not found' } };
+    }
+
+    const habitPayload = {
+      user_id: userId,
+      name: tpl.name,
+      description: tpl.description,
+      color: tpl.color || '#4ECDC4',
+      frequency: { type: 'daily', every: 1 },
+      start_date: new Date().toISOString().split('T')[0],
+      template_id: tpl.id
+    };
+
+    // Enforce habit creation limits (same as habits.create)
+    const { data: canCreate, error: checkError } = await supabase.rpc('can_create_habit', { 
+      p_user_id: userId 
+    });
+    
+    if (checkError) {
+      return { data: null, error: checkError };
+    }
+    
+    if (!canCreate) {
+      return { 
+        data: null, 
+        error: { 
+          message: 'Habit limit reached. Upgrade to Premium to create unlimited habits!',
+          code: 'HABIT_LIMIT_REACHED',
+          isPremiumFeature: true
+        } 
+      };
+    }
+
+    const { data, error } = await supabase
+      .from('habits')
+      .insert(habitPayload)
+      .select()
+      .single();
+
     return { data, error };
   },
 
@@ -611,15 +692,31 @@ export const storage = {
       throw new Error('Supabase not configured');
     }
     
-    // Convert file URI to blob for upload
+    // Convert file URI to a binary buffer suitable for upload in React Native
     const response = await fetch(fileUri);
-    const blob = await response.blob();
-    
+    let body = null;
+    try {
+      if (response.blob) {
+        body = await response.blob();
+      } else if (response.arrayBuffer) {
+        const buffer = await response.arrayBuffer();
+        // Convert ArrayBuffer to Uint8Array for upload
+        body = new Uint8Array(buffer);
+      } else {
+        // Last resort: read as text (base64 unlikely to work), pass response as-is
+        body = await response.text();
+      }
+    } catch (err) {
+      // Fallback for environments where blob() isn't available
+      const buffer = await response.arrayBuffer();
+      body = new Uint8Array(buffer);
+    }
+
     const filePath = `profiles/${userId}/${fileName}`;
-    
+
     const { data, error } = await supabase.storage
       .from('profile-images')
-      .upload(filePath, blob, {
+      .upload(filePath, body, {
         cacheControl: '3600',
         upsert: true,
       });
@@ -877,6 +974,81 @@ export const challenges = {
     return { data, error };
   },
 
+  // Create a habit from a challenge template and start a user challenge linked to that habit.
+  // Rolls back the habit if creating the user_challenges row fails.
+  startChallengeFromTemplate: async (userId, templateId, opts = {}) => {
+    if (!supabase) throw new Error('Supabase not configured');
+
+    // Fetch template
+    const { data: tpl, error: tplErr } = await supabase
+      .from('challenge_templates')
+      .select('*')
+      .eq('id', templateId)
+      .single();
+
+    if (tplErr || !tpl) {
+      return { data: null, error: tplErr || { message: 'Template not found' } };
+    }
+
+    const startDate = opts.start_date || new Date().toISOString().split('T')[0];
+    const duration = tpl.duration_days || (tpl.required_completions || 30);
+    const end = new Date(startDate);
+    end.setDate(end.getDate() + duration - 1);
+    const endDate = end.toISOString().split('T')[0];
+
+    // Create habit from template
+    const habitPayload = {
+      user_id: userId,
+      name: tpl.name,
+      description: tpl.description,
+      color: tpl.color || '#4ECDC4',
+      frequency: { type: 'daily', every: 1 },
+      start_date: startDate,
+      template_id: tpl.id
+    };
+
+    const { data: habit, error: habitErr } = await supabase
+      .from('habits')
+      .insert(habitPayload)
+      .select()
+      .single();
+
+    if (habitErr || !habit) {
+      return { data: null, error: habitErr || { message: 'Failed to create habit from template' } };
+    }
+
+    // Create user_challenges row linked to habit
+    const ucPayload = {
+      user_id: userId,
+      challenge_template_id: tpl.id,
+      habit_id: habit.id,
+      name: tpl.name,
+      description: tpl.description,
+      start_date: startDate,
+      end_date: endDate,
+      target_completions: tpl.required_completions || duration,
+      reward_points: tpl.reward_points || 0
+    };
+
+    const { data: uc, error: ucErr } = await supabase
+      .from('user_challenges')
+      .insert(ucPayload)
+      .select()
+      .single();
+
+    if (ucErr || !uc) {
+      // Attempt to rollback created habit to avoid dangling habits
+      try {
+        await supabase.from('habits').delete().eq('id', habit.id);
+      } catch (e) {
+        // ignore cleanup errors
+      }
+      return { data: null, error: ucErr || { message: 'Failed to create user challenge' } };
+    }
+
+    return { data: { habit, challenge: uc }, error: null };
+  },
+
   updateChallengeProgress: async (challengeId, userId) => {
     if (!supabase) throw new Error('Supabase not configured');
     try {
@@ -938,6 +1110,16 @@ export const gamification = {
     } catch (error) {
       return { data: null, error };
     }
+  },
+
+  // Fetch achievement definitions (including optional target_template_id)
+  getDefinitions: async () => {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error } = await supabase
+      .from('achievements')
+      .select('*')
+      .order('points', { ascending: false });
+    return { data, error };
   },
 
   unlockAchievement: async (userId, achievementId) => {

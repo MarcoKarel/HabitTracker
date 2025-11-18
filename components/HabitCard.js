@@ -3,11 +3,12 @@ import { View, Text, TouchableOpacity, StyleSheet, Animated, Easing } from 'reac
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
+import { usePressScale } from '../ui/animations';
 
 export default function HabitCard({ habit, onToggleCompletion, isCompleted }) {
   const theme = useTheme();
   const styles = createStyles(theme);
-  const [scaleAnim] = useState(new Animated.Value(1));
+  const { scale: scaleAnim, onPressIn, onPressOut } = usePressScale();
   const [checkAnim] = useState(new Animated.Value(isCompleted ? 1 : 0));
   const [pulseAnim] = useState(new Animated.Value(1));
 
@@ -28,19 +29,6 @@ export default function HabitCard({ habit, onToggleCompletion, isCompleted }) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
 
-    // Button animation
-    Animated.sequence([
-      Animated.timing(scaleAnim, {
-        toValue: 0.95,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(scaleAnim, {
-        toValue: 1,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-    ]).start();
 
     // Success pulse animation for completion
     if (!isCompleted) {
@@ -80,8 +68,13 @@ export default function HabitCard({ habit, onToggleCompletion, isCompleted }) {
       
       <TouchableOpacity
         style={[styles.checkbox, isCompleted && styles.checkboxCompleted]}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
         onPress={handlePress}
         activeOpacity={0.7}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        accessibilityLabel={`Mark ${habit.name} as done`}
+        accessibilityRole="button"
       >
         <Animated.View style={{
           transform: [
@@ -134,9 +127,9 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.colors.textTertiary,
   },
   checkbox: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 2,
     borderColor: theme.colors.primary,
     alignItems: 'center',

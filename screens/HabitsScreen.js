@@ -14,13 +14,20 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import HabitCard from '../components/HabitCard';
 import * as Haptics from 'expo-haptics';
 import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
 import { scheduleHabitNotification, cancelHabitNotifications, formatTime, DAYS_OF_WEEK } from '../utils/notifications';
-import { auth, habits as habitsService, habitCompletions } from '../services/supabaseService';
+import { auth, habits as habitsService, habitCompletions, challenges as challengesService, gamification as gamificationService } from '../services/supabaseService';
+const CHALLENGE_TEMPLATES = require('../Documentation/challenge_templates.json');
 
-export default function HabitsScreen() {
+const STORAGE_KEYS = {
+  PROGRESS_MAP: 'challengeProgressMap',
+  ACTIVE: 'activeChallengeName',
+}
+
+export default function HabitsScreen({ navigation }) {
   const theme = useTheme();
   const styles = createStyles(theme);
   const [habits, setHabits] = useState([]);
@@ -35,11 +42,17 @@ export default function HabitsScreen() {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState(null);
+  const [activeChallenge, setActiveChallenge] = useState(null);
+  const [activeProgress, setActiveProgress] = useState(0);
+  const [activeHabitId, setActiveHabitId] = useState(null);
 
   // Animation values
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(50));
   const [fabScale] = useState(new Animated.Value(1));
+
+  // Today's date string for comparisons
+  const todayStr = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
     initializeUser();
@@ -61,6 +74,29 @@ export default function HabitsScreen() {
     ]).start();
   }, []);
 
+  useEffect(() => {
+    if (!navigation) return;
+    const unsub = navigation.addListener('focus', async () => {
+      try {
+        // Ensure we refresh habits/completions when returning to this screen
+        const session = await auth.getCurrentUser();
+        const user = session?.data?.user;
+        if (user && user.id) {
+          setUserId(user.id);
+          await loadHabits(user.id);
+          await loadCompletions(user.id);
+        }
+      } catch (e) {
+        console.warn('Error refreshing habits on focus', e);
+      }
+
+      // Always refresh active challenge info from storage
+      await loadActiveFromStorage();
+    });
+
+    return unsub;
+  }, [navigation]);
+
   const initializeUser = async () => {
     try {
       const { data: { user } } = await auth.getCurrentUser();
@@ -68,6 +104,7 @@ export default function HabitsScreen() {
         setUserId(user.id);
         await loadHabits(user.id);
         await loadCompletions(user.id);
+        await loadActiveFromStorage();
       }
     } catch (error) {
       console.error('Error initializing user:', error);
@@ -75,6 +112,68 @@ export default function HabitsScreen() {
       setLoading(false);
     }
   };
+
+  const loadActiveFromStorage = async () => {
+    try {
+      const activeName = await AsyncStorage.getItem(STORAGE_KEYS.ACTIVE);
+      const rawMap = await AsyncStorage.getItem(STORAGE_KEYS.PROGRESS_MAP);
+      const rawHabitMap = await AsyncStorage.getItem('challengeHabitMap');
+      const habitMap = rawHabitMap ? JSON.parse(rawHabitMap) : {};
+      const map = rawMap ? JSON.parse(rawMap) : {};
+      if (activeName) {
+        const template = CHALLENGE_TEMPLATES.find(t => t.name === activeName);
+        const entry = map[activeName] || { completions: 0 };
+        setActiveChallenge(template || { name: activeName });
+        setActiveProgress(entry.completions || 0);
+        setActiveHabitId(habitMap[activeName] || null);
+      } else {
+        setActiveChallenge(null);
+        setActiveProgress(0);
+        setActiveHabitId(null);
+      }
+    } catch (e) {
+      console.warn('Error loading active challenge from storage', e);
+    }
+  }
+
+  const markActiveChallengeDone = async () => {
+    if (!activeChallenge) return;
+    const today = new Date().toISOString().split('T')[0];
+
+    // If we have a habit id for this challenge, prefer creating a real completion row
+    if (activeHabitId) {
+      const already = isHabitCompletedToday(activeHabitId);
+      if (already) {
+        Alert.alert('Already done', 'You already marked this habit completed today.');
+        return;
+      }
+
+      await toggleHabitCompletion(activeHabitId);
+    }
+
+    // Update local AsyncStorage progress map (works for both logged-out and logged-in flows)
+    try {
+      const raw = await AsyncStorage.getItem(STORAGE_KEYS.PROGRESS_MAP);
+      const map = raw ? JSON.parse(raw) : {};
+      const name = activeChallenge.name;
+      const entry = map[name] || { completions: 0, lastCompletionDate: null };
+      if (entry.lastCompletionDate === today) {
+        Alert.alert('Already done', 'You have already marked this challenge done today.');
+        return;
+      }
+      entry.completions = (entry.completions || 0) + 1;
+      entry.lastCompletionDate = today;
+      map[name] = entry;
+      await AsyncStorage.setItem(STORAGE_KEYS.PROGRESS_MAP, JSON.stringify(map));
+      setActiveProgress(entry.completions);
+
+      if (entry.completions >= (activeChallenge.required_completions || Infinity)) {
+        Alert.alert('Achievement unlocked!', `${name} completed!`);
+      }
+    } catch (e) {
+      console.warn('Error updating challenge progress', e);
+    }
+  }
 
   const loadHabits = async (uid) => {
     try {
@@ -101,6 +200,11 @@ export default function HabitsScreen() {
       console.error('Error loading completions:', error);
     }
   };
+
+  // Overall progress for today: number of completions for today's date vs total habits
+  const completedTodayCount = completions.filter(c => c.date === todayStr && habits.some(h => h.id === c.habit_id)).length;
+  const totalHabitsCount = habits.length;
+  const overallProgressPercent = totalHabitsCount > 0 ? (completedTodayCount / totalHabitsCount) : 0;
 
   const addHabit = async () => {
     if (newHabitName.trim() && userId) {
@@ -147,6 +251,27 @@ export default function HabitsScreen() {
           return;
         }
         setCompletions(completions.filter(c => c.id !== existingCompletion.id));
+        // If this completion belonged to the active challenge habit, update active progress
+        if (habitId === activeHabitId && activeChallenge) {
+          try {
+            const raw = await AsyncStorage.getItem(STORAGE_KEYS.PROGRESS_MAP);
+            const map = raw ? JSON.parse(raw) : {};
+            const name = activeChallenge.name;
+            const entry = map[name] || { completions: 0, lastCompletionDate: null };
+            // Only decrement if lastCompletionDate was today
+            if (entry.lastCompletionDate === today) {
+              entry.completions = Math.max(0, (entry.completions || 0) - 1);
+              entry.lastCompletionDate = null;
+              map[name] = entry;
+              await AsyncStorage.setItem(STORAGE_KEYS.PROGRESS_MAP, JSON.stringify(map));
+              setActiveProgress(entry.completions || 0);
+            }
+          } catch (e) {
+            console.warn('Failed to update active progress on deletion', e);
+          }
+        }
+        // Deletion of a completion will be handled by server-side logic if needed.
+        // Avoid calling `update_challenge_progress` here because that RPC increments progress.
       } else {
         // Add completion
         const newCompletion = {
@@ -160,10 +285,88 @@ export default function HabitsScreen() {
           return;
         }
         setCompletions([...completions, data]);
+        // If this completion is for the active challenge habit, update active progress
+        if (habitId === activeHabitId && activeChallenge) {
+          try {
+            const raw = await AsyncStorage.getItem(STORAGE_KEYS.PROGRESS_MAP);
+            const map = raw ? JSON.parse(raw) : {};
+            const name = activeChallenge.name;
+            const entry = map[name] || { completions: 0, lastCompletionDate: null };
+            if (entry.lastCompletionDate !== today) {
+              entry.completions = (entry.completions || 0) + 1;
+              entry.lastCompletionDate = today;
+              map[name] = entry;
+              await AsyncStorage.setItem(STORAGE_KEYS.PROGRESS_MAP, JSON.stringify(map));
+              setActiveProgress(entry.completions || 0);
+
+              if (entry.completions >= (activeChallenge.required_completions || Infinity)) {
+                Alert.alert('Achievement unlocked!', `${name} completed!`);
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to update active progress on completion', e);
+          }
+            // Ask server to update related user_challenge progress so achievements update
+            try {
+              const habitObj = habits.find(h => h.id === habitId);
+              if (habitObj && userId) {
+                const { data: userChallenges } = await challengesService.getUserChallenges(userId);
+                if (Array.isArray(userChallenges)) {
+                  const matched = userChallenges.find(uc => (uc.habit_id === habitId) || (uc.challenge_template_id && uc.challenge_template_id === habitObj.template_id));
+                  if (matched && matched.id) {
+                    const { error: updErr } = await challengesService.updateChallengeProgress(matched.id, userId);
+                    if (updErr) {
+                      console.warn('updateChallengeProgress error', updErr);
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('Failed to update server challenge progress on completion', e);
+            }
+        }
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to update completion');
     }
+  };
+
+  const deleteHabit = async (habit) => {
+    Alert.alert(
+      'Delete Habit',
+      `Are you sure you want to delete "${habit.name}"? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await habitsService.delete(habit.id);
+              if (error) {
+                Alert.alert('Error', 'Failed to delete habit');
+                return;
+              }
+              setHabits(habits.filter(h => h.id !== habit.id));
+              setCompletions(completions.filter(c => c.habit_id !== habit.id));
+              // If deleted habit was active challenge habit, clear active challenge
+              if (habit.id === activeHabitId) {
+                await AsyncStorage.removeItem(STORAGE_KEYS.ACTIVE);
+                const rawMap = await AsyncStorage.getItem(STORAGE_KEYS.PROGRESS_MAP);
+                const map = rawMap ? JSON.parse(rawMap) : {};
+                delete map[activeChallenge?.name];
+                await AsyncStorage.setItem(STORAGE_KEYS.PROGRESS_MAP, JSON.stringify(map));
+                setActiveChallenge(null);
+                setActiveProgress(0);
+                setActiveHabitId(null);
+              }
+            } catch (e) {
+              Alert.alert('Error', 'Failed to delete habit');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const isHabitCompletedToday = (habitId) => {
@@ -273,31 +476,50 @@ export default function HabitsScreen() {
     const notifications = item.settings?.notifications;
     return (
       <View style={styles.habitContainer}>
-        <HabitCard
-          habit={item}
-          onToggleCompletion={toggleHabitCompletion}
-          isCompleted={isHabitCompletedToday(item.id)}
-        />
+        <View style={{ flex: 1 }}>
+          <HabitCard
+            habit={item}
+            onToggleCompletion={toggleHabitCompletion}
+            isCompleted={isHabitCompletedToday(item.id)}
+          />
+        </View>
+
         <View style={styles.habitActions}>
           <TouchableOpacity
             style={[styles.notificationButton, notifications && styles.notificationActive]}
             onPress={() => openNotificationModal(item)}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityLabel={`Set reminders for ${item.name}`}
+            accessibilityRole="button"
           >
-            <Ionicons 
-              name={notifications ? "notifications" : "notifications-outline"} 
-              size={20} 
-              color={notifications ? "white" : "#007AFF"} 
+            <Ionicons
+              name={notifications ? 'notifications' : 'notifications-outline'}
+              size={22}
+              color={notifications ? 'white' : theme.colors.primary}
             />
           </TouchableOpacity>
-          
+
           {notifications && (
             <TouchableOpacity
               style={styles.removeNotificationButton}
               onPress={() => removeNotifications(item)}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityLabel={`Remove reminders for ${item.name}`}
+              accessibilityRole="button"
             >
-              <Ionicons name="close" size={16} color="#FF3B30" />
+              <Ionicons name="close" size={16} color={theme.colors.error} />
             </TouchableOpacity>
           )}
+
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={() => deleteHabit(item)}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityLabel={`Delete ${item.name}`}
+            accessibilityRole="button"
+          >
+            <Ionicons name="trash" size={20} color={theme.colors.error} />
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -350,6 +572,46 @@ export default function HabitsScreen() {
             <Ionicons name="add" size={24} color="white" />
           </TouchableOpacity>
         </Animated.View>
+        <TouchableOpacity
+          style={[styles.debugButtonHeader]}
+          onPress={async () => {
+            try {
+              const uid = userId;
+              if (!uid) {
+                Alert.alert('Not signed in', 'Please sign in to debug');
+                return;
+              }
+
+              const { data: userChallenges, error: ucErr } = await challengesService.getUserChallenges(uid);
+              const { data: completionsData, error: compErr } = await habitCompletions.getAll(uid);
+              const { data: achievementsData, error: achErr } = await gamificationService.getAchievements(uid);
+
+              console.debug('Debug Progress:', { userChallenges, completionsData, achievementsData, ucErr, compErr, achErr });
+
+              const ucCount = Array.isArray(userChallenges) ? userChallenges.length : 0;
+              const compCount = Array.isArray(completionsData) ? completionsData.length : 0;
+              const achCount = Array.isArray(achievementsData) ? achievementsData.length : 0;
+
+              const ucNames = (userChallenges || []).slice(0, 5).map(uc => uc.name || uc.id).join(', ') || '—';
+              const achSample = (achievementsData || []).slice(0, 5).map(a => `${a.name}(${a.progress||0}/${a.requirement_value||'—'})`).join('\n') || '—';
+
+              let msg = `user_challenges: ${ucCount}\ncompletions: ${compCount}\nachievements: ${achCount}\n\nChallenges: ${ucNames}\n\nAchievements sample:\n${achSample}`;
+              if (ucErr || compErr || achErr) {
+                msg += '\n\nErrors:';
+                if (ucErr) msg += `\nuser_challenges: ${ucErr.message || JSON.stringify(ucErr)}`;
+                if (compErr) msg += `\ncompletions: ${compErr.message || JSON.stringify(compErr)}`;
+                if (achErr) msg += `\nachievements: ${achErr.message || JSON.stringify(achErr)}`;
+              }
+
+              Alert.alert('Debug Progress', msg);
+            } catch (e) {
+              console.warn('Debug button error', e);
+              Alert.alert('Debug Error', e.message || JSON.stringify(e));
+            }
+          }}
+        >
+          <Ionicons name="bug" size={20} color={theme.colors.surface} />
+        </TouchableOpacity>
       </Animated.View>
 
       <Animated.View
@@ -359,6 +621,31 @@ export default function HabitsScreen() {
           transform: [{ translateY: slideAnim }]
         }}
       >
+        {activeChallenge && (
+          <View style={styles.activeBanner}>
+            <Text style={styles.activeBannerTitle}>Active Challenge</Text>
+            <Text style={styles.activeBannerName}>{activeChallenge.name}</Text>
+            {activeChallenge.description ? (
+              <Text style={styles.activeBannerDesc} numberOfLines={2}>{activeChallenge.description}</Text>
+            ) : null}
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: spacing.sm }}>
+              <TouchableOpacity style={styles.activeDoneButton} onPress={markActiveChallengeDone} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} accessibilityLabel="Mark active challenge done today" accessibilityRole="button">
+                <Text style={styles.activeDoneButtonText}>Done Today</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.activeProgressContainer}>
+              <View style={styles.activeProgressBackground}>
+                <View
+                  style={[
+                    styles.activeProgressFill,
+                    { width: `${Math.min(1, (activeProgress || 0) / (activeChallenge.required_completions || 1)) * 100}%`, backgroundColor: activeChallenge.color || '#4CAF50' }
+                  ]}
+                />
+              </View>
+              <Text style={styles.activeProgressText}>{`${activeProgress || 0}/${activeChallenge.required_completions || '—'}`}</Text>
+            </View>
+          </View>
+        )}
         <FlatList
           data={habits}
           renderItem={renderHabit}
@@ -527,31 +814,42 @@ const createStyles = (theme) => StyleSheet.create({
     justifyContent: 'center',
     ...getShadowStyle(theme, 'default'),
   },
+  debugButtonHeader: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: spacing.sm,
+    backgroundColor: 'transparent'
+  },
   listContainer: {
     paddingBottom: spacing.xl,
     paddingTop: spacing.sm,
   },
   habitContainer: {
-    position: 'relative',
-  },
-  habitActions: {
-    position: 'absolute',
-    right: spacing.md,
-    top: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
+    marginHorizontal: spacing.md,
+    marginVertical: spacing.sm,
+  },
+  habitActions: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    marginLeft: spacing.md,
     zIndex: 10,
   },
   notificationButton: {
     backgroundColor: theme.colors.card,
     borderWidth: 2,
     borderColor: theme.colors.primary,
-    borderRadius: 20,
-    width: 36,
-    height: 36,
+    borderRadius: 22,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: spacing.sm,
+    marginLeft: 0,
+    marginVertical: spacing.xs,
     ...getShadowStyle(theme, 'small'),
   },
   notificationActive: {
@@ -561,12 +859,21 @@ const createStyles = (theme) => StyleSheet.create({
     backgroundColor: theme.colors.card,
     borderWidth: 1,
     borderColor: theme.colors.error,
-    borderRadius: borderRadius.md,
-    width: 24,
-    height: 24,
+    borderRadius: 18,
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: spacing.xs,
+    marginVertical: spacing.xs,
+  },
+  deleteButton: {
+    backgroundColor: 'transparent',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: spacing.xs,
   },
   modalContainer: {
     flex: 1,
@@ -647,6 +954,75 @@ const createStyles = (theme) => StyleSheet.create({
   },
   dayButtonTextSelected: {
     color: '#FFFFFF',
+  },
+  activeBanner: {
+    backgroundColor: theme.colors.card,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    ...getShadowStyle(theme, 'small'),
+  },
+  activeBannerTitle: {
+    fontSize: fontSize.sm,
+    color: theme.colors.textSecondary,
+    fontWeight: fontWeight.semibold,
+    marginBottom: spacing.xs,
+  },
+  activeBannerName: {
+    fontSize: fontSize.lg,
+    color: theme.colors.text,
+    fontWeight: fontWeight.bold,
+  },
+  activeBannerDesc: {
+    color: theme.colors.text,
+    marginTop: spacing.xs,
+  },
+  activeProgressContainer: { marginTop: spacing.sm, flexDirection: 'row', alignItems: 'center' },
+  activeProgressBackground: {
+    flex: 1,
+    height: 8,
+    backgroundColor: theme.colors.surfaceVariant,
+    borderRadius: 6,
+    overflow: 'hidden',
+    marginRight: spacing.sm,
+  },
+  activeProgressFill: { height: '100%' },
+  activeProgressText: { width: 56, textAlign: 'right', fontSize: fontSize.xs, color: theme.colors.textSecondary },
+
+  overallProgressBox: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: theme.colors.card,
+    ...getShadowStyle(theme, 'small'),
+  },
+  overallProgressTitle: {
+    fontSize: fontSize.sm,
+    color: theme.colors.textSecondary,
+    fontWeight: fontWeight.semibold,
+  },
+  overallProgressBackground: {
+    width: '100%',
+    height: 10,
+    backgroundColor: theme.colors.surfaceVariant,
+    borderRadius: 6,
+    overflow: 'hidden',
+    marginTop: spacing.sm,
+  },
+  overallProgressFill: { height: '100%' },
+  overallProgressText: { fontSize: fontSize.xs, color: theme.colors.textSecondary },
+  activeDoneButton: {
+    backgroundColor: theme.colors.primary,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.sm,
+  },
+  activeDoneButtonText: {
+    color: '#fff',
+    fontWeight: fontWeight.semibold,
   },
   modalButtons: {
     flexDirection: 'row',

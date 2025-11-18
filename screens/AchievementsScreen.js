@@ -11,7 +11,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
-import { auth, gamification, userProfiles } from '../services/supabaseService';
+import { auth, gamification, userProfiles, challenges as challengesService } from '../services/supabaseService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function AchievementsScreen({ navigation }) {
   const theme = useTheme();
@@ -27,6 +28,26 @@ export default function AchievementsScreen({ navigation }) {
     initializeUser();
   }, []);
 
+  // Refresh achievements and merge local challenge progress when screen focuses
+  useEffect(() => {
+    if (!navigation) return;
+    const unsub = navigation.addListener('focus', async () => {
+      try {
+        const session = await auth.getCurrentUser();
+        const user = session?.data?.user;
+        if (user && user.id) {
+          await loadAchievements(user.id);
+          await loadUserStats(user.id);
+          await mergeLocalProgressIntoAchievements();
+        }
+      } catch (e) {
+        console.warn('Error refreshing achievements on focus', e);
+      }
+    });
+
+    return unsub;
+  }, [navigation]);
+
   const initializeUser = async () => {
     try {
       const { data: { user } } = await auth.getCurrentUser();
@@ -37,6 +58,31 @@ export default function AchievementsScreen({ navigation }) {
           loadAchievements(user.id),
           loadUserStats(user.id)
         ]);
+
+        // Fetch definitions and user's active challenges to merge template-linked progress
+        try {
+          const { data: defs } = await gamification.getDefinitions();
+          const { data: ucData } = await challengesService.getUserChallenges(user.id);
+          if (Array.isArray(defs) && Array.isArray(ucData)) {
+            // Attach target_template_id into achievements state where possible
+            setAchievements(prev => prev.map(a => {
+              const def = defs.find(d => d.id === a.achievement_id);
+              if (def && def.target_template_id) {
+                const matchedUc = ucData.find(uc => uc.challenge_template_id === def.target_template_id);
+                if (matchedUc) {
+                  return {
+                    ...a,
+                    progress: matchedUc.current_completions ?? a.progress,
+                    requirement_value: matchedUc.target_completions ?? a.requirement_value
+                  };
+                }
+              }
+              return a;
+            }));
+          }
+        } catch (e) {
+          console.warn('Failed to merge template-linked achievement progress', e);
+        }
       }
     } catch (error) {
       console.error('Error initializing:', error);
@@ -62,6 +108,25 @@ export default function AchievementsScreen({ navigation }) {
       console.error('Error loading achievements:', error);
     }
   };
+
+  const mergeLocalProgressIntoAchievements = async () => {
+    try {
+      const raw = await AsyncStorage.getItem('challengeProgressMap');
+      const map = raw ? JSON.parse(raw) : {};
+      if (!map || Object.keys(map).length === 0) return;
+
+      setAchievements(prev => prev.map(a => {
+        // If local progress exists for an achievement name, merge it in as `progress`
+        const entry = map[a.name];
+        if (entry && typeof entry.completions === 'number') {
+          return { ...a, progress: entry.completions };
+        }
+        return a;
+      }));
+    } catch (e) {
+      console.warn('Failed to merge local challenge progress into achievements', e);
+    }
+  }
 
   const loadUserStats = async (uid) => {
     try {
@@ -311,7 +376,7 @@ const createStyles = (theme) => StyleSheet.create({
     padding: spacing.md,
     alignItems: 'center',
     marginHorizontal: spacing.xs,
-    ...getShadowStyle(2),
+    ...getShadowStyle(theme, 'default'),
   },
   statValue: {
     fontSize: fontSize.xxl,
@@ -359,7 +424,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderRadius: borderRadius.lg,
     padding: spacing.md,
     marginBottom: spacing.md,
-    ...getShadowStyle(2),
+    ...getShadowStyle(theme, 'default'),
   },
   lockedAchievement: {
     opacity: 0.6,
@@ -464,7 +529,7 @@ const createStyles = (theme) => StyleSheet.create({
     borderRadius: borderRadius.lg,
     padding: spacing.xl,
     alignItems: 'center',
-    ...getShadowStyle(3),
+    ...getShadowStyle(theme, 'large'),
   },
   premiumTitle: {
     fontSize: fontSize.xl,
@@ -486,7 +551,7 @@ const createStyles = (theme) => StyleSheet.create({
     paddingVertical: spacing.md,
     borderRadius: borderRadius.full,
     alignItems: 'center',
-    ...getShadowStyle(2),
+    ...getShadowStyle(theme, 'default'),
   },
   premiumButtonText: {
     color: '#FFFFFF',
