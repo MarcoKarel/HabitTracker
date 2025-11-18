@@ -123,6 +123,44 @@ export default function HabitsScreen({ navigation }) {
       if (activeName) {
         const template = CHALLENGE_TEMPLATES.find(t => t.name === activeName);
         const entry = map[activeName] || { completions: 0 };
+        // If template not found in local JSON, try to resolve it from achievements definitions
+        if (!template) {
+          try {
+            const habitId = habitMap[activeName] || null;
+            let resolved = null;
+            // If we have a habitId, try to find the habit and its template_id
+            const habitObj = habitId ? habits.find(h => h.id === habitId) : null;
+
+            // Fetch definitions (achievement rows treated as templates)
+            const { data: defs } = await gamificationService.getDefinitions();
+            const { data: userAch } = userId ? await gamificationService.getAchievements(userId) : { data: null };
+
+            if (Array.isArray(defs)) {
+              // First try matching by habit.template_id (if habit exists)
+              if (habitObj && habitObj.template_id) {
+                resolved = defs.find(d => d.id === habitObj.template_id);
+              }
+              // Fall back to matching by name
+              if (!resolved) resolved = defs.find(d => d.name === activeName);
+            }
+
+            const requirement = resolved?.requirement_value || resolved?.required_completions || resolved?.duration_days || resolved?.duration || null;
+            const serverProgress = Array.isArray(userAch) ? userAch.find(a => a.achievement_id === resolved?.id || a.name === resolved?.name) : null;
+            const progress = serverProgress?.progress ?? entry.completions ?? 0;
+
+            setActiveChallenge(resolved ? { ...resolved, required_completions: requirement } : { name: activeName });
+            setActiveProgress(progress || 0);
+            setActiveHabitId(habitId);
+            return;
+          } catch (e) {
+            console.warn('Failed to resolve active challenge from achievements', e);
+            setActiveChallenge({ name: activeName });
+            setActiveProgress(entry.completions || 0);
+            setActiveHabitId(habitMap[activeName] || null);
+            return;
+          }
+        }
+
         setActiveChallenge(template || { name: activeName });
         setActiveProgress(entry.completions || 0);
         setActiveHabitId(habitMap[activeName] || null);
@@ -220,6 +258,13 @@ export default function HabitsScreen({ navigation }) {
         
         const { data, error } = await habitsService.create(newHabit);
         if (error) {
+          if (error.isPremiumFeature) {
+            showPremiumUpgrade(navigation, {
+              title: '🌟 Premium Feature',
+              message: 'Creating more habits requires a Premium subscription. Upgrade to add more habits.'
+            });
+            return;
+          }
           Alert.alert('Error', 'Failed to create habit');
           return;
         }
@@ -308,17 +353,20 @@ export default function HabitsScreen({ navigation }) {
           }
             // Ask server to update related user_challenge progress so achievements update
             try {
+              // Prefer using locally stored mappings (populated when a challenge is started)
               const habitObj = habits.find(h => h.id === habitId);
               if (habitObj && userId) {
-                const { data: userChallenges } = await challengesService.getUserChallenges(userId);
-                if (Array.isArray(userChallenges)) {
-                  const matched = userChallenges.find(uc => (uc.habit_id === habitId) || (uc.challenge_template_id && uc.challenge_template_id === habitObj.template_id));
-                  if (matched && matched.id) {
-                    const { error: updErr } = await challengesService.updateChallengeProgress(matched.id, userId);
-                    if (updErr) {
-                      console.warn('updateChallengeProgress error', updErr);
-                    }
-                  }
+                const rawHabitMap = await AsyncStorage.getItem('challengeHabitMap');
+                const habitMap = rawHabitMap ? JSON.parse(rawHabitMap) : {};
+                const rawUserMap = await AsyncStorage.getItem('challengeUserMap');
+                const userMap = rawUserMap ? JSON.parse(rawUserMap) : {};
+
+                // Find the activeName key that maps to this habit id
+                const matchedKey = Object.keys(habitMap).find(k => habitMap[k] === habitId);
+                const matchedId = matchedKey ? userMap[matchedKey] : null;
+                if (matchedId) {
+                  const { error: updErr } = await challengesService.updateChallengeProgress(matchedId, userId);
+                  if (updErr) console.warn('updateChallengeProgress error', updErr);
                 }
               }
             } catch (e) {
@@ -582,23 +630,24 @@ export default function HabitsScreen({ navigation }) {
                 return;
               }
 
-              const { data: userChallenges, error: ucErr } = await challengesService.getUserChallenges(uid);
               const { data: completionsData, error: compErr } = await habitCompletions.getAll(uid);
               const { data: achievementsData, error: achErr } = await gamificationService.getAchievements(uid);
 
-              console.debug('Debug Progress:', { userChallenges, completionsData, achievementsData, ucErr, compErr, achErr });
+              console.debug('Debug Progress:', { completionsData, achievementsData, compErr, achErr });
 
-              const ucCount = Array.isArray(userChallenges) ? userChallenges.length : 0;
               const compCount = Array.isArray(completionsData) ? completionsData.length : 0;
               const achCount = Array.isArray(achievementsData) ? achievementsData.length : 0;
 
-              const ucNames = (userChallenges || []).slice(0, 5).map(uc => uc.name || uc.id).join(', ') || '—';
+              // Count and sample only achievements that target challenge templates
+              const templateLinked = (achievementsData || []).filter(a => a.target_template_id);
+              const tCount = templateLinked.length;
+              const tSample = templateLinked.slice(0, 5).map(a => a.name || a.achievement_id).join(', ') || '—';
+
               const achSample = (achievementsData || []).slice(0, 5).map(a => `${a.name}(${a.progress||0}/${a.requirement_value||'—'})`).join('\n') || '—';
 
-              let msg = `user_challenges: ${ucCount}\ncompletions: ${compCount}\nachievements: ${achCount}\n\nChallenges: ${ucNames}\n\nAchievements sample:\n${achSample}`;
-              if (ucErr || compErr || achErr) {
+              let msg = `template-linked achievements: ${tCount}\ncompletions: ${compCount}\nachievements: ${achCount}\n\nTemplates: ${tSample}\n\nAchievements sample:\n${achSample}`;
+              if (compErr || achErr) {
                 msg += '\n\nErrors:';
-                if (ucErr) msg += `\nuser_challenges: ${ucErr.message || JSON.stringify(ucErr)}`;
                 if (compErr) msg += `\ncompletions: ${compErr.message || JSON.stringify(compErr)}`;
                 if (achErr) msg += `\nachievements: ${achErr.message || JSON.stringify(achErr)}`;
               }

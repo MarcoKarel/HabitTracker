@@ -11,7 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
-import { auth, gamification, userProfiles, challenges as challengesService } from '../services/supabaseService';
+import { auth, gamification, userProfiles } from '../services/supabaseService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function AchievementsScreen({ navigation }) {
@@ -59,29 +59,20 @@ export default function AchievementsScreen({ navigation }) {
           loadUserStats(user.id)
         ]);
 
-        // Fetch definitions and user's active challenges to merge template-linked progress
+        // Fetch definitions and attach template IDs into achievements state where applicable
         try {
           const { data: defs } = await gamification.getDefinitions();
-          const { data: ucData } = await challengesService.getUserChallenges(user.id);
-          if (Array.isArray(defs) && Array.isArray(ucData)) {
-            // Attach target_template_id into achievements state where possible
+          if (Array.isArray(defs)) {
             setAchievements(prev => prev.map(a => {
               const def = defs.find(d => d.id === a.achievement_id);
               if (def && def.target_template_id) {
-                const matchedUc = ucData.find(uc => uc.challenge_template_id === def.target_template_id);
-                if (matchedUc) {
-                  return {
-                    ...a,
-                    progress: matchedUc.current_completions ?? a.progress,
-                    requirement_value: matchedUc.target_completions ?? a.requirement_value
-                  };
-                }
+                return { ...a, target_template_id: def.target_template_id };
               }
               return a;
             }));
           }
         } catch (e) {
-          console.warn('Failed to merge template-linked achievement progress', e);
+          console.warn('Failed to attach template-linked ids to achievements', e);
         }
       }
     } catch (error) {

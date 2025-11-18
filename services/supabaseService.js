@@ -195,6 +195,36 @@ export const userProfiles = {
   },
 };
 
+// Premium helpers
+export const premiumHelpers = {
+  isPremiumUser: async (userId) => {
+    if (!supabase) throw new Error('Supabase not configured');
+    if (!userId) {
+      const sessionRes = await supabase.auth.getUser();
+      userId = sessionRes?.data?.user?.id;
+      if (!userId) return false;
+    }
+    const { data, error } = await supabase.rpc('is_user_premium', { p_user_id: userId });
+    if (error) return false;
+    return !!data;
+  },
+
+  requirePremiumOrReturnError: async (userId) => {
+    const isPremium = await premiumHelpers.isPremiumUser(userId);
+    if (!isPremium) {
+      return {
+        data: null,
+        error: {
+          message: 'This is a Premium feature. Upgrade to access it.',
+          code: 'PREMIUM_FEATURE_REQUIRED',
+          isPremiumFeature: true,
+        },
+      };
+    }
+    return { data: true, error: null };
+  },
+};
+
 // Habits functions
 export const habits = {
   getAll: async (userId) => {
@@ -206,15 +236,33 @@ export const habits = {
   createFromTemplate: async (userId, templateId) => {
     if (!supabase) throw new Error('Supabase not configured');
 
-    // Fetch the template
-    const { data: tpl, error: tplErr } = await supabase
-      .from('challenge_templates')
-      .select('*')
-      .eq('id', templateId)
-      .single();
+    // Fetch the template from `achievements` (category = 'challenges') to avoid dependency on challenge_templates
+    let tpl = null;
+    try {
+      const res = await supabase
+        .from('achievements')
+        .select('*')
+        .eq('id', templateId)
+        .single();
+      tpl = res.data;
+      if (!tpl) return { data: null, error: res.error || { message: 'Template not found' } };
+    } catch (e) {
+      return { data: null, error: e };
+    }
 
-    if (tplErr || !tpl) {
-      return { data: null, error: tplErr || { message: 'Template not found' } };
+    // Verify authenticated session matches provided userId (RLS will enforce insert permissions)
+    try {
+      const sessionRes = await supabase.auth.getUser();
+      const sessionUser = sessionRes?.data?.user;
+      if (!sessionUser || !sessionUser.id) {
+        return { data: null, error: { message: 'Not authenticated. Please sign in to create a habit from a template.' } };
+      }
+      if (userId && sessionUser.id !== userId) {
+        return { data: null, error: { message: 'Authenticated user does not match provided userId.' } };
+      }
+      userId = sessionUser.id;
+    } catch (e) {
+      return { data: null, error: e };
     }
 
     const habitPayload = {
@@ -247,13 +295,22 @@ export const habits = {
       };
     }
 
-    const { data, error } = await supabase
-      .from('habits')
-      .insert(habitPayload)
-      .select()
-      .single();
+    // Create habit server-side using RPC that sets user_id = auth.uid() to satisfy RLS
+    try {
+      const { data: habitData, error: habitErr } = await supabase.rpc('create_habit_from_template', {
+        p_name: habitPayload.name,
+        p_description: habitPayload.description,
+        p_color: habitPayload.color,
+        p_start_date: habitPayload.start_date,
+        p_template_id: habitPayload.template_id
+      });
 
-    return { data, error };
+      if (habitErr) return { data: null, error: habitErr };
+      const created = Array.isArray(habitData) ? habitData[0] : habitData;
+      return { data: created, error: null };
+    } catch (e) {
+      return { data: null, error: e };
+    }
   },
 
   create: async (habit) => {
@@ -326,6 +383,9 @@ export const habits = {
 
   getAnalytics: async (userId, habitId) => {
     if (!supabase) throw new Error('Supabase not configured');
+    // Premium guard
+    const _checkAnalytics = await premiumHelpers.requirePremiumOrReturnError(userId);
+    if (_checkAnalytics.error) return _checkAnalytics;
     try {
       const { data, error } = await supabase.rpc('get_habit_analytics', {
         p_user_id: userId,
@@ -401,6 +461,8 @@ export const habitCompletions = {
 export const habitCategories = {
   getAll: async (userId) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const _check = await premiumHelpers.requirePremiumOrReturnError(userId);
+    if (_check.error) return _check;
     const { data, error } = await supabase
       .from('habit_categories')
       .select('*')
@@ -411,6 +473,8 @@ export const habitCategories = {
 
   create: async (category) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const _check = await premiumHelpers.requirePremiumOrReturnError(category.user_id);
+    if (_check.error) return _check;
     const { data, error } = await supabase
       .from('habit_categories')
       .insert(category)
@@ -432,6 +496,11 @@ export const habitCategories = {
 
   delete: async (id) => {
     if (!supabase) throw new Error('Supabase not configured');
+    // Need to look up owner to verify premium status
+    const { data: existing, error: e } = await supabase.from('habit_categories').select('user_id').eq('id', id).single();
+    if (e) return { data: null, error: e };
+    const _check = await premiumHelpers.requirePremiumOrReturnError(existing.user_id);
+    if (_check.error) return _check;
     const { error } = await supabase
       .from('habit_categories')
       .delete()
@@ -456,6 +525,8 @@ export const habitTemplates = {
 
   getRecommendations: async (userId) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const _check = await premiumHelpers.requirePremiumOrReturnError(userId);
+    if (_check.error) return _check;
     try {
       const { data, error } = await supabase.rpc('get_habit_recommendations', {
         p_user_id: userId
@@ -481,6 +552,8 @@ export const habitTemplates = {
 export const dataExport = {
   exportUserData: async (userId) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const _check = await premiumHelpers.requirePremiumOrReturnError(userId);
+    if (_check.error) return _check;
     try {
       const { data, error } = await supabase.rpc('export_user_data', {
         p_user_id: userId
@@ -545,6 +618,8 @@ export const dataExport = {
 export const customThemes = {
   getAll: async (userId) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const _check = await premiumHelpers.requirePremiumOrReturnError(userId);
+    if (_check.error) return _check;
     const { data, error } = await supabase
       .from('custom_themes')
       .select('*')
@@ -555,6 +630,8 @@ export const customThemes = {
 
   create: async (theme) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const _check = await premiumHelpers.requirePremiumOrReturnError(theme.user_id);
+    if (_check.error) return _check;
     const { data, error } = await supabase
       .from('custom_themes')
       .insert(theme)
@@ -576,6 +653,10 @@ export const customThemes = {
 
   delete: async (id) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const { data: existing, error: e } = await supabase.from('custom_themes').select('user_id').eq('id', id).single();
+    if (e) return { data: null, error: e };
+    const _check = await premiumHelpers.requirePremiumOrReturnError(existing.user_id);
+    if (_check.error) return _check;
     const { error } = await supabase
       .from('custom_themes')
       .delete()
@@ -609,6 +690,8 @@ export const customThemes = {
 export const habitPhotos = {
   getAll: async (userId, habitId = null) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const _check = await premiumHelpers.requirePremiumOrReturnError(userId);
+    if (_check.error) return _check;
     let query = supabase
       .from('habit_photos')
       .select('*')
@@ -625,6 +708,8 @@ export const habitPhotos = {
 
   create: async (photo) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const _check = await premiumHelpers.requirePremiumOrReturnError(photo.user_id);
+    if (_check.error) return _check;
     const { data, error } = await supabase
       .from('habit_photos')
       .insert(photo)
@@ -635,6 +720,10 @@ export const habitPhotos = {
 
   delete: async (id) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const { data: existing, error: e } = await supabase.from('habit_photos').select('user_id').eq('id', id).single();
+    if (e) return { data: null, error: e };
+    const _check = await premiumHelpers.requirePremiumOrReturnError(existing.user_id);
+    if (_check.error) return _check;
     const { error } = await supabase
       .from('habit_photos')
       .delete()
@@ -644,6 +733,8 @@ export const habitPhotos = {
 
   uploadPhoto: async (userId, habitId, fileUri, note = null) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const _check = await premiumHelpers.requirePremiumOrReturnError(userId);
+    if (_check.error) return _check;
     
     // Convert file URI to blob for upload
     const response = await fetch(fileUri);
@@ -801,6 +892,8 @@ export const socialFeatures = {
   // Friend connections
   sendFriendRequest: async (userId, friendEmail) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const _check = await premiumHelpers.requirePremiumOrReturnError(userId);
+    if (_check.error) return _check;
     
     // First, find the friend by email
     const { data: friend, error: friendError } = await supabase
@@ -839,6 +932,8 @@ export const socialFeatures = {
 
   getFriends: async (userId) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const _check = await premiumHelpers.requirePremiumOrReturnError(userId);
+    if (_check.error) return _check;
     const { data, error } = await supabase
       .from('friend_connections')
       .select(`
@@ -854,6 +949,8 @@ export const socialFeatures = {
 
   getPendingRequests: async (userId) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const _check = await premiumHelpers.requirePremiumOrReturnError(userId);
+    if (_check.error) return _check;
     const { data, error } = await supabase
       .from('friend_connections')
       .select(`
@@ -878,6 +975,8 @@ export const socialFeatures = {
   // Leaderboard
   getLeaderboard: async (userId, period = 'weekly') => {
     if (!supabase) throw new Error('Supabase not configured');
+    const _check = await premiumHelpers.requirePremiumOrReturnError(userId);
+    if (_check.error) return _check;
     try {
       const { data, error } = await supabase.rpc('get_friends_leaderboard', {
         p_user_id: userId,
@@ -918,6 +1017,8 @@ export const socialFeatures = {
 
   getSharedHabits: async (userId) => {
     if (!supabase) throw new Error('Supabase not configured');
+    const _check = await premiumHelpers.requirePremiumOrReturnError(userId);
+    if (_check.error) return _check;
     const { data, error } = await supabase
       .from('habit_shares')
       .select(`
@@ -939,17 +1040,40 @@ export const socialFeatures = {
 export const challenges = {
   getTemplates: async (isPremium = false) => {
     if (!supabase) throw new Error('Supabase not configured');
-    let query = supabase
-      .from('challenge_templates')
-      .select('*')
-      .order('difficulty');
-    
-    if (!isPremium) {
-      query = query.eq('is_premium', false);
+    // Read templates from the `achievements` table where category = 'challenges'.
+    // This allows using a single table (achievements) as the source of truth for challenge-like templates.
+    try {
+      let query = supabase
+        .from('achievements')
+        .select('*')
+        .eq('category', 'challenges')
+        .order('points', { ascending: false });
+
+      // If the achievements table contains an `is_premium` flag, filter accordingly.
+      if (!isPremium) query = query.eq('is_premium', false);
+
+      const { data, error } = await query;
+      if (error) return { data: null, error };
+
+      // Map achievement rows into a shape compatible with the UI's expected challenge template fields
+      const mapped = (data || []).map(a => ({
+        id: a.id,
+        name: a.name,
+        description: a.description,
+        icon: a.icon,
+        color: a.color || a.icon_color || '#4ECDC4',
+        // compatibility with existing UI: prefer explicit fields if present
+        duration_days: a.duration_days || a.required_completions || a.requirement_value || a.duration || null,
+        required_completions: a.required_completions || a.requirement_value || null,
+        reward_points: a.points || 0,
+        is_premium: a.is_premium || false,
+        raw: a
+      }));
+
+      return { data: mapped, error: null };
+    } catch (error) {
+      return { data: null, error };
     }
-    
-    const { data, error } = await query;
-    return { data, error };
   },
 
   getUserChallenges: async (userId) => {
@@ -980,18 +1104,70 @@ export const challenges = {
     if (!supabase) throw new Error('Supabase not configured');
 
     // Fetch template
-    const { data: tpl, error: tplErr } = await supabase
-      .from('challenge_templates')
-      .select('*')
-      .eq('id', templateId)
-      .single();
+    // Support templates stored in `achievements` (category='challenges') as well as legacy challenge_templates.
+    let tpl = null;
+    let tplErr = null;
+    try {
+      const res = await supabase
+        .from('achievements')
+        .select('*')
+        .eq('id', templateId)
+        .single();
+      tpl = res.data;
+      tplErr = res.error;
+      // If not found in achievements, fall back to challenge_templates
+      // Do not fallback to `challenge_templates` to avoid relying on that table.
+    } catch (e) {
+      tpl = null;
+      tplErr = e;
+    }
 
     if (tplErr || !tpl) {
       return { data: null, error: tplErr || { message: 'Template not found' } };
     }
 
+    // Ensure the caller is authenticated and matches the provided userId to satisfy RLS policies
+    try {
+      const sessionRes = await supabase.auth.getUser();
+      const sessionUser = sessionRes?.data?.user;
+      if (!sessionUser || !sessionUser.id) {
+        return { data: null, error: { message: 'Not authenticated. Please sign in to start a challenge.' } };
+      }
+      if (userId && sessionUser.id !== userId) {
+        return { data: null, error: { message: 'Authenticated user does not match provided userId.' } };
+      }
+      // Prefer the session user id as authoritative
+      userId = sessionUser.id;
+    } catch (e) {
+      return { data: null, error: e };
+    }
+
+    // Enforce challenge limits: free users may have 1 active challenge, premium users up to 3
+    try {
+      const { data: activeList, error: activeErr } = await supabase
+        .from('user_challenges')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('status', 'active');
+      if (activeErr) {
+        return { data: null, error: activeErr };
+      }
+
+      const { data: isPremiumFlag, error: premiumErr } = await userProfiles.isPremium(userId);
+      if (premiumErr) {
+        return { data: null, error: premiumErr };
+      }
+      const isPremium = !!isPremiumFlag;
+      const maxActive = isPremium ? 3 : 1;
+      if (Array.isArray(activeList) && activeList.length >= maxActive) {
+        return { data: null, error: { message: `Challenge limit reached. ${isPremium ? 'Premium' : 'Free'} users may have up to ${maxActive} active challenge${maxActive>1?'s':''}.`, code: 'CHALLENGE_LIMIT_REACHED' } };
+      }
+    } catch (e) {
+      return { data: null, error: e };
+    }
+
     const startDate = opts.start_date || new Date().toISOString().split('T')[0];
-    const duration = tpl.duration_days || (tpl.required_completions || 30);
+    const duration = tpl?.duration_days || tpl?.required_completions || tpl?.requirement_value || 30;
     const end = new Date(startDate);
     end.setDate(end.getDate() + duration - 1);
     const endDate = end.toISOString().split('T')[0];
@@ -1001,33 +1177,52 @@ export const challenges = {
       user_id: userId,
       name: tpl.name,
       description: tpl.description,
-      color: tpl.color || '#4ECDC4',
+      color: tpl.color || tpl.icon_color || '#4ECDC4',
       frequency: { type: 'daily', every: 1 },
       start_date: startDate,
       template_id: tpl.id
     };
 
-    const { data: habit, error: habitErr } = await supabase
-      .from('habits')
-      .insert(habitPayload)
-      .select()
-      .single();
+    // Create habit server-side using RPC that sets user_id = auth.uid() to satisfy RLS
+    try {
+      const { data: habitData, error: habitErr } = await supabase.rpc('create_habit_from_template', {
+        p_name: habitPayload.name,
+        p_description: habitPayload.description,
+        p_color: habitPayload.color,
+        p_start_date: habitPayload.start_date,
+        p_template_id: habitPayload.template_id
+      });
 
-    if (habitErr || !habit) {
-      return { data: null, error: habitErr || { message: 'Failed to create habit from template' } };
+      if (habitErr) {
+        return { data: null, error: habitErr };
+      }
+
+      // RPC returns the created habit row (as a record) — supabase-js may wrap it in an array
+      const habit = Array.isArray(habitData) ? habitData[0] : habitData;
+      if (!habit) {
+        return { data: null, error: { message: 'Failed to create habit from template' } };
+      }
+    
+      // continue with `habit` variable
+      // (we shadowed earlier variable names; ensure `habit` is available below)
+      var createdHabit = habit;
+    } catch (e) {
+      return { data: null, error: e };
     }
 
     // Create user_challenges row linked to habit
+    const habit = createdHabit || null;
+
     const ucPayload = {
       user_id: userId,
       challenge_template_id: tpl.id,
-      habit_id: habit.id,
+      habit_id: habit?.id,
       name: tpl.name,
       description: tpl.description,
       start_date: startDate,
       end_date: endDate,
-      target_completions: tpl.required_completions || duration,
-      reward_points: tpl.reward_points || 0
+      target_completions: tpl.required_completions || tpl.requirement_value || duration,
+      reward_points: tpl.reward_points || tpl.points || 0
     };
 
     const { data: uc, error: ucErr } = await supabase

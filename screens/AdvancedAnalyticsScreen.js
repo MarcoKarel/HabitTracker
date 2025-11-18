@@ -14,6 +14,7 @@ import { LineChart, BarChart } from 'react-native-chart-kit';
 import * as Haptics from 'expo-haptics';
 import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
 import { auth, habits as habitsService, userProfiles } from '../services/supabaseService';
+import { showPremiumUpgrade } from '../ui/PremiumUpgrade';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -62,14 +63,10 @@ export default function AdvancedAnalyticsScreen({ route, navigation }) {
       const { data, error } = await habitsService.getAnalytics(uid, hId);
       
       if (error?.isPremiumFeature) {
-        Alert.alert(
-          '🌟 Premium Feature',
-          'Advanced Analytics is available with Premium subscription. Upgrade to unlock detailed insights about your habits!',
-          [
-            { text: 'Not Now', style: 'cancel' },
-            { text: 'Upgrade', onPress: () => navigation.navigate('Payment') }
-          ]
-        );
+        showPremiumUpgrade(navigation, {
+          title: '🌟 Premium Feature',
+          message: 'Advanced Analytics is available with Premium subscription. Upgrade to unlock detailed insights about your habits!'
+        });
         navigation.goBack();
         return;
       }

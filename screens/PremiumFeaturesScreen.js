@@ -16,6 +16,7 @@ import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
 import { auth, userProfiles, dataExport, habits as habitsService, habitCompletions } from '../services/supabaseService';
+import { showPremiumUpgrade } from '../ui/PremiumUpgrade';
 
 export default function PremiumFeaturesScreen({ navigation }) {
   const theme = useTheme();
@@ -78,6 +79,10 @@ export default function PremiumFeaturesScreen({ navigation }) {
       const { data: exportData, error } = await dataExport.exportUserData(userId);
       
       if (error) {
+        if (error.isPremiumFeature) {
+          showPremiumAlert();
+          return;
+        }
         Alert.alert('Error', 'Failed to export data');
         return;
       }
@@ -120,16 +125,10 @@ export default function PremiumFeaturesScreen({ navigation }) {
     }
   };
 
-  const showPremiumAlert = () => {
-    Alert.alert(
-      '🌟 Premium Feature',
-      'This feature is available with Premium subscription. Upgrade now to unlock all features!',
-      [
-        { text: 'Not Now', style: 'cancel' },
-        { text: 'Upgrade', onPress: () => navigation.navigate('Payment') }
-      ]
-    );
-  };
+  const showPremiumAlert = () => showPremiumUpgrade(navigation, {
+    title: '🌟 Premium Feature',
+    message: 'This feature is available with Premium subscription. Upgrade now to unlock all features!'
+  });
 
   const navigateToFeature = (feature) => {
     if (!isPremium && feature.requiresPremium) {

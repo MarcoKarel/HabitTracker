@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
 import { auth, socialFeatures, userProfiles } from '../services/supabaseService';
+import { showPremiumUpgrade } from '../ui/PremiumUpgrade';
 
 export default function SocialScreen({ navigation }) {
   const theme = useTheme();
@@ -68,6 +69,10 @@ export default function SocialScreen({ navigation }) {
 
       if (friendsRes.data) setFriends(friendsRes.data);
       if (requestsRes.data) setPendingRequests(requestsRes.data);
+      if (leaderboardRes.error?.isPremiumFeature) {
+        showPremiumAlert();
+        return;
+      }
       if (leaderboardRes.data) setLeaderboard(leaderboardRes.data);
     } catch (error) {
       console.error('Error loading data:', error);
@@ -149,16 +154,10 @@ export default function SocialScreen({ navigation }) {
     );
   };
 
-  const showPremiumAlert = () => {
-    Alert.alert(
-      '🌟 Premium Feature',
-      'Social features require Premium. Upgrade now to compete with friends!',
-      [
-        { text: 'Not Now', style: 'cancel' },
-        { text: 'Upgrade', onPress: () => navigation.navigate('Payment') }
-      ]
-    );
-  };
+  const showPremiumAlert = () => showPremiumUpgrade(navigation, {
+    title: '🌟 Premium Feature',
+    message: 'Social features require Premium. Upgrade now to compete with friends!',
+  });
 
   if (loading) {
     return (

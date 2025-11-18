@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, 
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme, spacing, borderRadius, fontSize, fontWeight, getShadowStyle } from '../constants/Theme';
-import { auth, challenges as challengesService, habits as habitsService } from '../services/supabaseService';
+import { auth, challenges as challengesService, habits as habitsService, gamification as gamificationService, userProfiles } from '../services/supabaseService';
 
 const STORAGE_KEYS = {
   PROGRESS_MAP: 'challengeProgressMap',
@@ -17,6 +17,8 @@ export default function ChallengesScreen({ navigation }) {
   const styles = createStyles(theme);
   const [templates, setTemplates] = useState([]);
   const [userChallenges, setUserChallenges] = useState([]);
+  const [activeCount, setActiveCount] = useState(0);
+  const [maxActive, setMaxActive] = useState(1);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
   const [userId, setUserId] = useState(null);
@@ -40,15 +42,41 @@ export default function ChallengesScreen({ navigation }) {
       } else {
         console.debug('Challenge templates fetched:', (data || []).length);
         setTemplates(data || []);
-        // If user is signed in, fetch their active challenges to show progress on cards
+        // If user is signed in, fetch their active challenges to show progress on cards and enforce limits
         if (uid) {
           try {
-            const { data: ucData, error: ucErr } = await challengesService.getUserChallenges(uid);
-            if (!ucErr && Array.isArray(ucData)) {
-              setUserChallenges(ucData);
+            // Load user's achievements and map any achievement that targets a challenge template
+            const { data: achData, error: achErr } = await gamificationService.getAchievements(uid);
+            if (!achErr && Array.isArray(achData)) {
+              const mapped = achData
+                .filter(a => a.target_template_id)
+                .map(a => ({
+                  challenge_template_id: a.target_template_id,
+                  current_completions: a.progress ?? 0,
+                  target_completions: a.requirement_value ?? 0,
+                  name: a.name
+                }));
+              setUserChallenges(mapped);
+            }
+            // Fetch active user_challenges count
+            try {
+              const { data: ucData } = await challengesService.getUserChallenges(uid);
+              const count = Array.isArray(ucData) ? ucData.length : 0;
+              setActiveCount(count);
+            } catch (e) {
+              console.warn('Failed to load active challenges count', e);
+            }
+
+            // Determine max allowed based on premium status
+            try {
+              const { data: isPremiumFlag } = await userProfiles.isPremium(uid);
+              const isPremium = !!isPremiumFlag;
+              setMaxActive(isPremium ? 3 : 1);
+            } catch (e) {
+              console.warn('Failed to check premium status', e);
             }
           } catch (e) {
-            console.warn('Failed to load user challenges for progress', e);
+            console.warn('Failed to load achievements for challenge progress', e);
           }
         }
         if (!data || (Array.isArray(data) && data.length === 0)) {
@@ -102,12 +130,24 @@ export default function ChallengesScreen({ navigation }) {
         console.warn('Failed to persist active challenge locally', e);
       }
 
-      // Refresh userChallenges so progress shows immediately on cards
+      // Refresh progress from achievements so cards show immediately
       try {
-        const { data: ucDataArr, error: ucErr } = await challengesService.getUserChallenges(userId);
-        if (!ucErr && Array.isArray(ucDataArr)) setUserChallenges(ucDataArr);
+        const { data: achDataArr, error: achErr } = await gamificationService.getAchievements(userId);
+        if (!achErr && Array.isArray(achDataArr)) {
+          const mapped = achDataArr
+            .filter(a => a.target_template_id)
+            .map(a => ({
+              challenge_template_id: a.target_template_id,
+              current_completions: a.progress ?? 0,
+              target_completions: a.requirement_value ?? 0,
+              name: a.name
+            }));
+          setUserChallenges(mapped);
+          // Increase active count since a new challenge was created
+          setActiveCount(prev => prev + 1);
+        }
       } catch (e) {
-        console.warn('Failed to refresh user challenges after starting', e);
+        console.warn('Failed to refresh challenge progress after starting', e);
       }
 
       Alert.alert('Challenge started', `${template.name} has been added to your habits.`);
@@ -126,27 +166,40 @@ export default function ChallengesScreen({ navigation }) {
       ? userChallenges.find(uc => uc.challenge_template_id === item.id || uc.name === item.name)
       : null;
 
+    const canStart = matched ? true : (activeCount < maxActive);
+
     const current = matched?.current_completions ?? 0;
     const target = matched?.target_completions ?? item.required_completions ?? item.duration_days ?? 0;
     const percent = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
 
+    const isActive = !!matched;
+
     return (
-      <View style={[styles.card, { borderLeftColor: item.color || theme.colors.primary }]}> 
-        <View style={styles.cardContent}>
+      <View style={[
+        styles.card,
+        { borderLeftColor: item.color || theme.colors.primary },
+        isActive ? styles.activeCard : null
+      ]}> 
+        <View style={[styles.cardContent, isActive ? styles.activeCardContent : null]}>
           <View style={styles.titleRow}>
             <View style={styles.titleContainer}>
-              <Text style={styles.title}>{item.name}</Text>
+              <Text style={[styles.title, isActive ? styles.titleActive : null]}>{item.name}</Text>
               {item.is_premium && (
                 <View style={styles.premiumBadge}>
                   <Ionicons name="lock-closed" size={12} color="#fff" style={styles.lockIcon} />
                   <Text style={styles.premiumText}>Premium</Text>
                 </View>
               )}
+              {matched && (
+                <View style={styles.activeBadge}>
+                  <Text style={styles.activeBadgeText}>Active</Text>
+                </View>
+              )}
             </View>
             <Text style={styles.duration}>{item.duration_days ? `${item.duration_days}d` : ''}</Text>
           </View>
           {item.description ? (
-            <Text style={styles.description} numberOfLines={2}>{item.description}</Text>
+            <Text style={[styles.description, isActive ? styles.descriptionActive : null]} numberOfLines={2}>{item.description}</Text>
           ) : null}
 
           <View style={styles.progressRow}>
@@ -156,10 +209,26 @@ export default function ChallengesScreen({ navigation }) {
             <Text style={styles.progressText}>{`${current}/${target || '—'}`}</Text>
           </View>
 
+          {isActive && (
+            <View style={styles.progressDetailRow}>
+              <Text style={styles.progressDetail}>{`Progress: ${current}/${target || '—'} (${percent}%)`}</Text>
+            </View>
+          )}
+
           <View style={styles.actionsRow}>
-            <TouchableOpacity style={[styles.startButton, { backgroundColor: theme.colors.primary }]} onPress={() => onStart(item)}>
-              <Text style={styles.startText}>{matched ? 'Open' : 'Start'}</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.startButton, { backgroundColor: theme.colors.primary, opacity: canStart ? 1 : 0.5 }]}
+                onPress={() => {
+                  if (!canStart) {
+                    Alert.alert('Limit reached', `You can only have ${maxActive} active challenge${maxActive>1?'s':''} at a time. Upgrade to Premium to add more.`);
+                    return;
+                  }
+                  onStart(item);
+                }}
+                disabled={!canStart}
+              >
+                <Text style={styles.startText}>{matched ? 'Open' : 'Start'}</Text>
+              </TouchableOpacity>
 
             <TouchableOpacity style={[styles.doTodayButton, { backgroundColor: theme.colors.primaryVariant || theme.colors.accent }]} onPress={() => Alert.alert('Do Today', 'Use the Habits screen to mark progress.') }>
               <Text style={styles.doTodayText}>Do Today</Text>
@@ -198,8 +267,14 @@ export default function ChallengesScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Challenges</Text>
+      <View style={styles.headerRow}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Challenges</Text>
+          <Text style={styles.headerSubtitle}>{`Active: ${activeCount}/${maxActive}`}</Text>
+        </View>
+        <TouchableOpacity style={styles.upgradeButton} onPress={() => navigation?.navigate('Payment')}>
+          <Text style={styles.upgradeText}>Upgrade</Text>
+        </TouchableOpacity>
       </View>
       {errorMsg && (
         <View style={styles.errorContainer}>
@@ -234,10 +309,36 @@ const createStyles = (theme) => StyleSheet.create({
     borderBottomColor: theme.colors.cardBorder,
     ...getShadowStyle(theme, 'small'),
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.lg,
+    backgroundColor: theme.colors.card,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.cardBorder,
+  },
   headerTitle: {
     fontSize: fontSize.xxl,
     fontWeight: fontWeight.bold,
     color: theme.colors.text,
+  },
+  headerSubtitle: {
+    marginTop: spacing.xs,
+    color: theme.colors.textSecondary,
+    fontSize: fontSize.sm,
+  },
+  upgradeButton: {
+    marginRight: spacing.md,
+    backgroundColor: theme.colors.primary,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.sm,
+  },
+  upgradeText: {
+    color: '#fff',
+    fontWeight: fontWeight.semibold,
   },
   list: {
     paddingBottom: spacing.xl,
@@ -275,6 +376,18 @@ const createStyles = (theme) => StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 12,
     marginLeft: spacing.sm,
+  },
+  activeBadge: {
+    marginLeft: spacing.sm,
+    backgroundColor: theme.colors.success || '#4CAF50',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  activeBadgeText: {
+    color: '#fff',
+    fontSize: fontSize.xs,
+    fontWeight: fontWeight.semibold,
   },
   premiumText: {
     color: '#FFFFFF',
@@ -325,6 +438,27 @@ const createStyles = (theme) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: spacing.md,
+  },
+  progressDetailRow: {
+    marginTop: spacing.xs,
+  },
+  progressDetail: {
+    color: theme.colors.text,
+    fontSize: fontSize.sm,
+    fontWeight: fontWeight.semibold,
+  },
+  activeCard: {
+    opacity: 0.85,
+    backgroundColor: theme.colors.surfaceVariant,
+  },
+  activeCardContent: {
+    // slightly dim inner content when active
+  },
+  titleActive: {
+    color: theme.colors.textSecondary,
+  },
+  descriptionActive: {
+    color: theme.colors.textSecondary,
   },
   progressBarBackground: {
     flex: 1,
